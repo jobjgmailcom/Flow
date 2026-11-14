@@ -24,6 +24,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.font.FontWeight
 import io.github.aedev.flow.R
 import io.github.aedev.flow.data.local.GestureOverlayStyle
 import io.github.aedev.flow.data.local.MiniBarSwipeAction
@@ -37,6 +38,7 @@ import io.github.aedev.flow.ui.components.musicplayer.controls.ExpressiveWavySli
 import io.github.aedev.flow.ui.components.musicplayer.controls.SquigglySlider
 import io.github.aedev.flow.ui.components.musicplayer.controls.expressiveSliderSpec
 import io.github.aedev.flow.ui.components.musicplayer.full.PlayerBackground
+import io.github.aedev.flow.ui.components.musicplayer.queue.badgeRes
 import io.github.aedev.flow.ui.components.musicplayer.queue.containerColor
 import io.github.aedev.flow.ui.components.musicplayer.queue.contentColor
 import io.github.aedev.flow.ui.components.musicplayer.queue.icon
@@ -224,6 +226,14 @@ internal fun QueueSwipePreview(
     ) {
         Icon(imageVector = swipe.icon, contentDescription = null, tint = swipe.contentColor)
         Text(text = stringResource(swipe.labelRes), style = MaterialTheme.typography.titleSmall, color = swipe.contentColor)
+        swipe.badgeRes?.let {
+            Text(
+                text = stringResource(it),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.Bold,
+                color = swipe.contentColor,
+            )
+        }
     }
 }
 

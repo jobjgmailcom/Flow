@@ -74,9 +74,14 @@ class MusicBrainEngine
          */
         val hiddenArtists: kotlinx.coroutines.flow.StateFlow<Set<String>> = _hiddenArtists
 
+        /** Permanently blocked tracks, kept current so the queue drops a row as soon as it is blocked. */
+        private val _blockedTracks = kotlinx.coroutines.flow.MutableStateFlow<Set<String>>(emptySet())
+        val blockedTracks: kotlinx.coroutines.flow.StateFlow<Set<String>> = _blockedTracks
+
         /** Must run with the mutex held (or during single-threaded init). */
         private fun refreshHiddenArtistsLocked() {
             _hiddenArtists.value = MusicBrainLearn.hiddenArtistKeys(brain, System.currentTimeMillis())
+            _blockedTracks.value = brain.blockedTracks.toSet()
         }
 
         /** Previous counted artist + timestamp, for session co-occurrence. Ephemeral, never persisted. */
@@ -464,6 +469,45 @@ class MusicBrainEngine
         suspend fun getBlockedArtists(): List<String> {
             ensureInitialized()
             return mutex.withLock { brain.blockedArtists.sorted() }
+        }
+
+        /** Permanent per-track block. The artist is untouched: only this track is denied. */
+        suspend fun blockTrack(trackId: String) {
+            ensureInitialized()
+            mutex.withLock {
+                MusicBrainLearn.blockTrack(brain, trackId.trim())
+                refreshHiddenArtistsLocked()
+            }
+            scheduleDebouncedSave()
+        }
+
+        suspend fun unblockTrack(trackId: String) {
+            ensureInitialized()
+            mutex.withLock {
+                MusicBrainLearn.unblockTrack(brain, trackId.trim())
+                refreshHiddenArtistsLocked()
+            }
+            scheduleDebouncedSave()
+        }
+
+        suspend fun getBlockedTracks(): List<String> {
+            ensureInitialized()
+            return mutex.withLock { brain.blockedTracks.sorted() }
+        }
+
+        /** Blocked tracks as (trackId, display title) — the id alone means nothing to the viewer. */
+        suspend fun getBlockedTracksWithNames(): List<Pair<String, String>> {
+            ensureInitialized()
+            return mutex.withLock {
+                brain.blockedTracks
+                    .map { id ->
+                        val meta = brain.trackMeta[id]
+                        val display = meta?.title?.takeIf { it.isNotBlank() }?.let { title ->
+                            meta.artist.takeIf { it.isNotBlank() }?.let { "$title — $it" } ?: title
+                        } ?: id
+                        id to display
+                    }.sortedBy { it.second.lowercase() }
+            }
         }
 
         /** Blocked artists as (key, display name) — id keys are opaque, the UI needs names. */

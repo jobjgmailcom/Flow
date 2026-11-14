@@ -124,6 +124,9 @@ class MusicBrain {
     /** Permanent denylist. Affinity/history is preserved so an unblock warms back up naturally. */
     val blockedArtists: MutableSet<String> = HashSet()
 
+    /** Permanent per-track denylist, keyed by track id. Independent of the artist denylist. */
+    val blockedTracks: MutableSet<String> = HashSet()
+
     var discoveryAppetite: Double = MusicBrainParams.DISCOVERY_NEUTRAL
     var totalPlays: Int = 0
     var lastRotationDecay: Long = 0L
@@ -133,6 +136,8 @@ class MusicBrain {
     var backfilled: Boolean = false
 
     fun isArtistBlocked(key: String): Boolean = key.isNotEmpty() && key in blockedArtists
+
+    fun isTrackBlocked(trackId: String): Boolean = trackId.isNotEmpty() && trackId in blockedTracks
 
     fun topArtists(n: Int): List<Pair<String, Double>> =
         artistAffinity.entries
@@ -217,6 +222,12 @@ object MusicBrainParams {
     const val TIME_BUCKET_MIN_PLAYS = 2
     const val DISLIKE_COOLDOWN_MS = 14L * 24 * 60 * 60 * 1000
     const val DISLIKE_COOLDOWN_MULTIPLIER = 0.1
+
+    /** A track heard inside this window is not served again by the queue or the radio. */
+    const val RECENT_TRACK_COOLDOWN_MS = 48L * 60 * 60 * 1000
+
+    /** Cap for the permanent per-track denylist. */
+    const val BLOCKED_TRACKS_MAX = 1000
     const val MAX_CONSECUTIVE_ARTIST = 2
 
     /** Radio is a station, not an album: back-to-back same-artist reads as a bug there. */

@@ -183,6 +183,26 @@ internal object MusicBrainLearn {
     }
 
     /**
+     * Permanent per-track block, independent of the artist denylist: the rest of that
+     * artist stays eligible. History is kept, so an unblock restores the old weight.
+     */
+    fun blockTrack(
+        brain: MusicBrain,
+        trackId: String,
+    ) {
+        if (trackId.isEmpty()) return
+        brain.blockedTracks.add(trackId)
+        prune(brain)
+    }
+
+    fun unblockTrack(
+        brain: MusicBrain,
+        trackId: String,
+    ) {
+        brain.blockedTracks.remove(trackId)
+    }
+
+    /**
      * A picked artist starts where a liked song would put them, without inventing plays, so stats
      * and the recap stay true. Unpicking forgets an artist only if they were never played.
      */
@@ -371,6 +391,16 @@ internal object MusicBrainLearn {
         if (brain.blockedArtists.size > MusicBrainParams.BLOCKED_MAX) {
             val excess = brain.blockedArtists.size - MusicBrainParams.BLOCKED_MAX
             val iterator = brain.blockedArtists.iterator()
+            repeat(excess) {
+                if (iterator.hasNext()) {
+                    iterator.next()
+                    iterator.remove()
+                }
+            }
+        }
+        if (brain.blockedTracks.size > MusicBrainParams.BLOCKED_TRACKS_MAX) {
+            val excess = brain.blockedTracks.size - MusicBrainParams.BLOCKED_TRACKS_MAX
+            val iterator = brain.blockedTracks.iterator()
             repeat(excess) {
                 if (iterator.hasNext()) {
                     iterator.next()

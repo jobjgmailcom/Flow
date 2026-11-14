@@ -463,6 +463,25 @@ class MusicPlayerViewModel
 
         fun removeFromQueue(index: Int): EnhancedMusicPlayerManager.RemovedQueueTrack? = EnhancedMusicPlayerManager.removeFromQueue(index)
 
+        /**
+         * Swipe-to-block on a queue row: permanent artist block. The rest of that artist's
+         * catalogue leaves the queue and the radio; the row itself is removed by the caller.
+         */
+        fun blockArtistFromQueue(track: MusicTrack) {
+            val primary = track.artists.firstOrNull()
+            viewModelScope.launch(PerformanceDispatcher.diskIO) {
+                musicBrain.blockArtist(
+                    primary?.id ?: track.channelId.takeIf { it.isNotBlank() },
+                    primary?.name ?: track.artist,
+                )
+            }
+        }
+
+        /** Swipe-to-block on a queue row: permanent block of this track only, artist untouched. */
+        fun blockTrackFromQueue(track: MusicTrack) {
+            viewModelScope.launch(PerformanceDispatcher.diskIO) { musicBrain.blockTrack(track.videoId) }
+        }
+
         fun moveQueueTrackToEnd(index: Int) {
             val lastIndex = _uiState.value.queue.size - 1
             if (index in 0 until lastIndex) EnhancedMusicPlayerManager.moveMediaItem(index, lastIndex)

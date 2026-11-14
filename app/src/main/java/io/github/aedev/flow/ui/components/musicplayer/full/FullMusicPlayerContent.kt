@@ -166,6 +166,8 @@ internal fun FullMusicPlayerContent(
                 onRemoveFromQueue = { index ->
                     viewModel.removeFromQueue(index)?.let { quickActions.announce(removedFromQueue, QuickActionUndo.MusicQueueRemoval(it)) }
                 },
+                onBlockArtist = { viewModel.blockArtistFromQueue(it) },
+                onBlockTrack = { viewModel.blockTrackFromQueue(it) },
                 onRadioTrackClick = { viewModel.playRadioTrack(it) },
                 onPlayNextRadio = { viewModel.playNextFromRadio(it) },
                 onAddRadioToQueue = { viewModel.addRadioTrackToQueue(it) },

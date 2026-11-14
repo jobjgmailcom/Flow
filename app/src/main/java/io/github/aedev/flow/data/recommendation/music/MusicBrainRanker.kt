@@ -118,6 +118,21 @@ internal object MusicBrainRanker {
         return nowMs - ts < MusicBrainParams.DISLIKE_COOLDOWN_MS
     }
 
+    /**
+     * A track heard inside [MusicBrainParams.RECENT_TRACK_COOLDOWN_MS] is not served again
+     * by the queue or the radio. It expires on its own and is deliberately independent of
+     * the permanent denylist and of the swipe gestures.
+     */
+    fun isInRecentTrackCooldown(
+        brain: MusicBrain,
+        trackId: String,
+        nowMs: Long,
+    ): Boolean {
+        if (trackId.isEmpty()) return false
+        val newest = brain.trackPlays[trackId]?.lastOrNull() ?: return false
+        return nowMs - newest < MusicBrainParams.RECENT_TRACK_COOLDOWN_MS
+    }
+
     private fun scoreCandidate(
         brain: MusicBrain,
         input: MusicRankInput,
@@ -185,17 +200,24 @@ internal object MusicBrainRanker {
         surface: String,
         nowMs: Long,
     ): List<Int> {
-        if (inputs.size <= 1) return inputs.indices.toList()
+        if (inputs.size <= 1) {
+            // A single candidate still has to respect the permanent denylists.
+            return inputs.indices.filterNot { brain.isArtistBlocked(inputs[it].artistKey) || brain.isTrackBlocked(inputs[it].trackId) }
+        }
 
         val w = surfaceWeights(surface)
         val bucket = MusicTimeBucket.fromTimestamp(nowMs)
         val anchors = brain.topArtists(MusicBrainParams.COOC_ANCHOR_ARTISTS).map { it.first }
 
         val scores = inputs.map { scoreCandidate(brain, it, w, anchors, bucket, nowMs) }
+        // Permanent track blocks apply everywhere; the heard-recently cooldown is a queue/radio rule.
+        val recentCooldownApplies = surface == SURFACE_RADIO
         val order =
             inputs.indices
                 .sortedWith(compareByDescending<Int> { scores[it] }.thenBy { it })
                 .filterNot { brain.isArtistBlocked(inputs[it].artistKey) }
+                .filterNot { brain.isTrackBlocked(inputs[it].trackId) }
+                .filterNot { recentCooldownApplies && isInRecentTrackCooldown(brain, inputs[it].trackId, nowMs) }
 
         val (suppressed, primary) = order.partition { isInDislikeCooldown(brain, inputs[it].artistKey, nowMs) }
 
@@ -291,6 +313,7 @@ internal object MusicBrainRanker {
         brain.trackPlays.keys
             .asSequence()
             .filter { trackId ->
+                if (brain.isTrackBlocked(trackId)) return@filter false
                 val meta = brain.trackMeta[trackId]
                 meta == null || !brain.isArtistBlocked(meta.artistKey)
             }.map { it to baseLevelActivation(brain, it, nowMs) }

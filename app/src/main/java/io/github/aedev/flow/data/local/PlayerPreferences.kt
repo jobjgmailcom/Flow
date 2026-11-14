@@ -5006,6 +5006,12 @@ enum class QueueSwipeAction {
     PLAY_NEXT,
     MOVE_TO_END,
     REMOVE,
+
+    /** Permanently block the row's artist; the rest of the queue and the radio drop them. */
+    BLOCK_ARTIST,
+
+    /** Permanently block only this track; the artist's other songs stay eligible. */
+    BLOCK_TRACK,
     ;
 
     companion object {

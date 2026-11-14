@@ -55,6 +55,7 @@ internal fun HiddenContentScreen(
         )
         hiddenChannels(hidden.channels, hidden.resolvingNames, viewModel::unblockChannel)
         hiddenGroup("hidden.artists", R.string.taste_hidden_artists, hidden.artists, viewModel::unblockArtist)
+        hiddenGroup("hidden.tracks", R.string.taste_hidden_tracks, hidden.tracks, viewModel::unblockTrack)
     }
 }
 

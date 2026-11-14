@@ -4189,6 +4189,12 @@
     <string name="fallback_downloaded_locally">Downloaded locally</string>
     <string name="fallback_more_results">More results</string>
     <string name="remove_from_queue">Remove from queue</string>
+    <!-- Swipe-to-block: A blocks the artist, M blocks only this track. -->
+    <string name="queue_block_artist">Block artist</string>
+    <string name="taste_hidden_tracks">Blocked tracks</string>
+    <string name="queue_block_track">Block track</string>
+    <string name="queue_swipe_badge_artist">A</string>
+    <string name="queue_swipe_badge_track">M</string>
     <string name="removed_from_queue">Removed from queue</string>
     <string name="queue_after_this_template">%1$s after this</string>
     <string name="reorder_queue_item">Reorder queue item</string>

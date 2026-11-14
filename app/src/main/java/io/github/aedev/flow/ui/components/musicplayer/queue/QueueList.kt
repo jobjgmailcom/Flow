@@ -67,6 +67,10 @@ internal class QueueActions(
     val onPlayNextFromQueue: (Int) -> Unit,
     val onSendQueueTrackToEnd: (Int) -> Unit,
     val onRemoveFromQueue: (Int) -> Unit,
+
+    /** Swipe-to-block: a permanent artist block, or a permanent block of just this track. */
+    val onBlockArtist: (MusicTrack) -> Unit,
+    val onBlockTrack: (MusicTrack) -> Unit,
     val onRadioTrackClick: (MusicTrack) -> Unit,
     val onPlayNextRadio: (MusicTrack) -> Unit,
     val onAddRadioToQueue: (MusicTrack) -> Unit,
@@ -145,6 +149,14 @@ internal fun QueueList(
             QueueRowSwipe.PLAY_NEXT -> actions.onPlayNextFromQueue(index)
             QueueRowSwipe.MOVE_TO_END, QueueRowSwipe.ADD_TO_QUEUE -> actions.onSendQueueTrackToEnd(index)
             QueueRowSwipe.REMOVE -> actions.onRemoveFromQueue(index)
+            QueueRowSwipe.BLOCK_ARTIST -> {
+                localQueue.getOrNull(index)?.let(actions.onBlockArtist)
+                actions.onRemoveFromQueue(index)
+            }
+            QueueRowSwipe.BLOCK_TRACK -> {
+                localQueue.getOrNull(index)?.let(actions.onBlockTrack)
+                actions.onRemoveFromQueue(index)
+            }
         }
     }
 

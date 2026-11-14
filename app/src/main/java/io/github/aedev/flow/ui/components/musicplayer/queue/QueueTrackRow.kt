@@ -345,19 +345,34 @@ private fun BoxScope.SwipeRevealPanel(
                 .background(backgroundColor),
         contentAlignment = if (towardLeft) AbsoluteAlignment.CenterRight else AbsoluteAlignment.CenterLeft,
     ) {
-        Icon(
-            imageVector = swipe.icon,
-            contentDescription = stringResource(swipe.labelRes),
-            tint = contentColor,
+        val badge = swipe.badgeRes
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
             modifier =
                 Modifier
                     .padding(horizontal = 14.dp)
-                    .size(22.dp)
                     .graphicsLayer {
                         alpha = iconAlpha
                         scaleX = iconScale
                         scaleY = iconScale
                     },
-        )
+        ) {
+            Icon(
+                imageVector = swipe.icon,
+                contentDescription = stringResource(swipe.labelRes),
+                tint = contentColor,
+                modifier = Modifier.size(22.dp),
+            )
+            // Only the permanent blocks carry a letter (A = artist, M = track).
+            if (badge != null) {
+                Text(
+                    text = stringResource(badge),
+                    color = contentColor,
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.Bold,
+                )
+            }
+        }
     }
 }

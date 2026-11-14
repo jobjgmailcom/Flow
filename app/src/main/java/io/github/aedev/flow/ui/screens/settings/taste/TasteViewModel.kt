@@ -97,10 +97,11 @@ data class HiddenContent(
     /** A channel with a blank name is one the device has no name for yet. */
     val channels: List<NamedItem> = emptyList(),
     val artists: List<NamedItem> = emptyList(),
+    val tracks: List<NamedItem> = emptyList(),
     /** Whether the names [channels] lack are being fetched. */
     val resolvingNames: Boolean = false,
 ) {
-    val count: Int get() = topics.size + channels.size + artists.size
+    val count: Int get() = topics.size + channels.size + artists.size + tracks.size
 }
 
 @Immutable
@@ -227,6 +228,8 @@ class TasteViewModel
 
         fun unblockArtist(artistKey: String) = act { musicBrain.unblockArtist(artistKey) }
 
+        fun unblockTrack(trackId: String) = act { musicBrain.unblockTrack(trackId) }
+
         fun forgetChannel(channelId: String) = act { channelMemory.forget(channelId) }
 
         fun clearChannelMemory() = act { channelMemory.clear() }
@@ -322,6 +325,11 @@ class TasteViewModel
                 channels = hiddenChannelOrder(brain.blockedChannels.map { NamedItem(it, known[it].orEmpty()) }),
                 artists =
                     runCatching { musicBrain.getBlockedArtistsWithNames() }
+                        .getOrDefault(
+                            emptyList(),
+                        ).map { NamedItem(it.first, it.second) },
+                tracks =
+                    runCatching { musicBrain.getBlockedTracksWithNames() }
                         .getOrDefault(
                             emptyList(),
                         ).map { NamedItem(it.first, it.second) },

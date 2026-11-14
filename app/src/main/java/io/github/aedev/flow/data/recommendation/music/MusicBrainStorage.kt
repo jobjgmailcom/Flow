@@ -70,6 +70,7 @@ internal class MusicBrainStorage(
         val seenArtists: List<String> = emptyList(),
         val dislikedArtists: Map<String, Long> = emptyMap(),
         val blockedArtists: List<String> = emptyList(),
+        val blockedTracks: List<String> = emptyList(),
         val discoveryAppetite: Double = MusicBrainParams.DISCOVERY_NEUTRAL,
         val totalPlays: Int = 0,
         val lastRotationDecay: Long = 0L,
@@ -149,6 +150,7 @@ private fun MusicBrainStorage.SerializableMusicBrain.hasAnyState(): Boolean =
         trackPlays.isNotEmpty() ||
         seenArtists.isNotEmpty() ||
         blockedArtists.isNotEmpty() ||
+        blockedTracks.isNotEmpty() ||
         backfilled
 
 internal fun MusicBrain.toSerializable(): MusicBrainStorage.SerializableMusicBrain =
@@ -171,6 +173,7 @@ internal fun MusicBrain.toSerializable(): MusicBrainStorage.SerializableMusicBra
         seenArtists = seenArtists.toList(),
         dislikedArtists = dislikedArtists.toMap(),
         blockedArtists = blockedArtists.toList(),
+        blockedTracks = blockedTracks.toList(),
         discoveryAppetite = discoveryAppetite,
         totalPlays = totalPlays,
         lastRotationDecay = lastRotationDecay,
@@ -197,6 +200,7 @@ internal fun MusicBrainStorage.SerializableMusicBrain.toMusicBrain(): MusicBrain
     brain.seenArtists.addAll(seenArtists)
     brain.dislikedArtists.putAll(dislikedArtists)
     brain.blockedArtists.addAll(blockedArtists)
+    brain.blockedTracks.addAll(blockedTracks)
     brain.discoveryAppetite = discoveryAppetite
     brain.totalPlays = totalPlays
     brain.lastRotationDecay = lastRotationDecay
