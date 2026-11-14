@@ -1,0 +1,67 @@
+name: Dev nightly APK
+
+# Compila la variante github nightly (R8 completo, canal nightly) y sube los APK
+# SIN FIRMAR. La firma se hace en el teléfono con la clave local.
+#
+# Input `pr`:
+#   true  → -Pflow.prBuild=true  → applicationId io.github.aedev.flow.nightly.pr
+#           Convive con el Flow Nightly OFICIAL (no hay que desinstalar nada).
+#   false → applicationId io.github.aedev.flow.nightly
+#           Ocupa el hueco del nightly oficial: Android exige desinstalarlo antes
+#           (firma distinta), y eso borra sus datos.
+
+on:
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: "pr=true → id .nightly.pr (coexiste con el nightly oficial)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  nightly-apk:
+    name: Build github nightly (unsigned)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Use CI Gradle properties
+        run: mkdir -p ~/.gradle && cp .github/ci-gradle.properties ~/.gradle/gradle.properties
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build github nightly APK
+        run: >
+          ./gradlew :app:assembleGithubNightly
+          ${{ inputs.pr && '-Pflow.prBuild=true' || '' }}
+          --stacktrace
+
+      - name: Show outputs
+        run: |
+          set -euo pipefail
+          ls -lh app/build/outputs/apk/github/nightly/
+          find app/build/outputs/apk -name '*.apk' -printf '%f  %s bytes\n'
+
+      - name: Upload nightly APKs
+        uses: actions/upload-artifact@v7
+        with:
+          name: flow-nightly-unsigned
+          path: app/build/outputs/apk/github/nightly/*.apk
+          if-no-files-found: error
+          retention-days: 14
