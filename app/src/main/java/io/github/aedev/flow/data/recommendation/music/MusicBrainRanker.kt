@@ -191,8 +191,9 @@ internal object MusicBrainRanker {
             (input.genre?.let { brain.genreAffinity[it] } ?: 0.0) > MusicBrainParams.ADJACENT_GENRE_THRESHOLD
 
     /**
-     * The full pipeline: score → hard-drop blocked → sink dislike-cooldowns to the
-     * end → compose to the surface's novelty target → spread long same-artist runs.
+     * The full pipeline: score → hard-drop blocked and heard-recently tracks → sink
+     * dislike-cooldowns to the end → compose to the surface's novelty target → spread
+     * long same-artist runs.
      */
     fun rank(
         brain: MusicBrain,
@@ -202,7 +203,11 @@ internal object MusicBrainRanker {
     ): List<Int> {
         if (inputs.size <= 1) {
             // A single candidate still has to respect the permanent denylists.
-            return inputs.indices.filterNot { brain.isArtistBlocked(inputs[it].artistKey) || brain.isTrackBlocked(inputs[it].trackId) }
+            return inputs.indices.filterNot {
+                brain.isArtistBlocked(inputs[it].artistKey) ||
+                    brain.isTrackBlocked(inputs[it].trackId) ||
+                    isInRecentTrackCooldown(brain, inputs[it].trackId, nowMs)
+            }
         }
 
         val w = surfaceWeights(surface)
@@ -210,14 +215,12 @@ internal object MusicBrainRanker {
         val anchors = brain.topArtists(MusicBrainParams.COOC_ANCHOR_ARTISTS).map { it.first }
 
         val scores = inputs.map { scoreCandidate(brain, it, w, anchors, bucket, nowMs) }
-        // Permanent track blocks apply everywhere; the heard-recently cooldown is a queue/radio rule.
-        val recentCooldownApplies = surface == SURFACE_RADIO
         val order =
             inputs.indices
                 .sortedWith(compareByDescending<Int> { scores[it] }.thenBy { it })
                 .filterNot { brain.isArtistBlocked(inputs[it].artistKey) }
                 .filterNot { brain.isTrackBlocked(inputs[it].trackId) }
-                .filterNot { recentCooldownApplies && isInRecentTrackCooldown(brain, inputs[it].trackId, nowMs) }
+                .filterNot { isInRecentTrackCooldown(brain, inputs[it].trackId, nowMs) }
 
         val (suppressed, primary) = order.partition { isInDislikeCooldown(brain, inputs[it].artistKey, nowMs) }
 
