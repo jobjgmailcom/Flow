@@ -141,6 +141,28 @@ internal fun QueueList(
         }
     }
 
+    /** Suggestions dropped or blocked from the radio list; they reappear only on the next batch. */
+    val dismissedRadio = remember { mutableStateListOf<String>() }
+
+    fun onRadioSwipe(
+        swipe: QueueRowSwipe,
+        track: MusicTrack,
+    ) {
+        when (swipe) {
+            QueueRowSwipe.PLAY_NEXT -> actions.onPlayNextRadio(track)
+            QueueRowSwipe.ADD_TO_QUEUE, QueueRowSwipe.MOVE_TO_END -> actions.onAddRadioToQueue(track)
+            QueueRowSwipe.REMOVE -> dismissedRadio.add(track.videoId)
+            QueueRowSwipe.BLOCK_ARTIST -> {
+                actions.onBlockArtist(track)
+                dismissedRadio.add(track.videoId)
+            }
+            QueueRowSwipe.BLOCK_TRACK -> {
+                actions.onBlockTrack(track)
+                dismissedRadio.add(track.videoId)
+            }
+        }
+    }
+
     fun onQueueSwipe(
         swipe: QueueRowSwipe,
         index: Int,
@@ -298,7 +320,10 @@ internal fun QueueList(
         }
 
         if (endlessRadioEnabled) {
-            itemsIndexed(radioTracks, key = { _, track -> "radio:${track.videoId}" }) { _, track ->
+            itemsIndexed(
+                radioTracks.filterNot { it.videoId in dismissedRadio },
+                key = { _, track -> "radio:${track.videoId}" },
+            ) { _, track ->
                 Box(modifier = Modifier.animateItem()) {
                     QueueTrackRow(
                         track = track,
@@ -308,13 +333,11 @@ internal fun QueueList(
                         isDragging = false,
                         swipeEnabled = true,
                         isDownloaded = downloadedTrackIds.contains(track.videoId),
-                        leftSwipe = QueueRowSwipe.PLAY_NEXT,
-                        rightSwipe = QueueRowSwipe.ADD_TO_QUEUE,
+                        leftSwipe = swipes.left.rowSwipe,
+                        rightSwipe = swipes.right.rowSwipe,
                         rowKey = "radio:${track.videoId}",
                         onClick = { actions.onRadioTrackClick(track) },
-                        onSwipe = { swipe ->
-                            if (swipe == QueueRowSwipe.PLAY_NEXT) actions.onPlayNextRadio(track) else actions.onAddRadioToQueue(track)
-                        },
+                        onSwipe = { swipe -> onRadioSwipe(swipe, track) },
                         onMenu = { menuTarget = QueueMenuTarget(track, index = -1, isRadioItem = true) },
                     )
                 }
