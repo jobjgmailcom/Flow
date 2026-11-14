@@ -1,0 +1,75 @@
+name: Dev release APK
+
+# Compila la variante FOSS release (R8 completo, sin updater) y sube los APK
+# SIN FIRMAR. La firma se hace después en el teléfono con la clave local
+# (~/flow-release.keystore), así que no hace falta ningún secreto en el repo.
+#
+# Por qué FOSS: applicationId = io.github.aedev.flow, sin actualizador propio,
+# y convive instalado junto a Flow Nightly (io.github.aedev.flow.nightly).
+#
+# Por qué sin firmar: un fine-grained token sin permiso "Secrets" no puede
+# cargar el keystore, y meter la clave en el repo (público) la expondría.
+
+on:
+  workflow_dispatch:
+  push:
+    branches-ignore: [ main ]
+    paths-ignore:
+      - '**/*.md'
+      - 'Assets/**'
+      - 'fastlane/**'
+
+permissions:
+  contents: read
+
+jobs:
+  release-apk:
+    name: Build FOSS release (unsigned)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Use CI Gradle properties
+        run: mkdir -p ~/.gradle && cp .github/ci-gradle.properties ~/.gradle/gradle.properties
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build foss release APK
+        run: ./gradlew :app:assembleFossRelease --stacktrace
+
+      - name: Show outputs
+        run: |
+          set -euo pipefail
+          ls -lh app/build/outputs/apk/foss/release/
+          for f in app/build/outputs/apk/foss/release/*.apk; do
+            printf '%s  %s bytes\n' "$(basename "$f")" "$(stat --format='%s' "$f")"
+          done
+
+      - name: Upload release APKs
+        uses: actions/upload-artifact@v7
+        with:
+          name: flow-release-unsigned
+          path: app/build/outputs/apk/foss/release/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload R8 mapping
+        uses: actions/upload-artifact@v7
+        with:
+          name: flow-r8-mapping
+          path: app/build/outputs/mapping/fossRelease/mapping.txt
+          if-no-files-found: warn
+          retention-days: 30
