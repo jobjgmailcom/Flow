@@ -11,14 +11,8 @@ name: Dev release APK
 # cargar el keystore, y meter la clave en el repo (público) la expondría.
 
 on:
+  # Solo disparo manual: nada se compila por un push.
   workflow_dispatch:
-  push:
-    branches-ignore: [ main ]
-    paths-ignore:
-      - '**/*.md'
-      - 'Assets/**'
-      - 'fastlane/**'
-
 permissions:
   contents: read
 
