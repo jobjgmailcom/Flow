@@ -1,0 +1,56 @@
+name: Dev debug APK
+
+# Compila un APK de prueba SIN keystore, SIN R8 y SIN secretos.
+# Pensado para forks: se dispara a mano (Actions -> Run workflow) o al empujar
+# a cualquier rama que no sea main.
+#
+# Por qué debug: applicationIdSuffix = ".debug" (io.github.aedev.flow.debug),
+# así convive con el Flow Nightly oficial ya instalado, no choca de firma y
+# no necesita ningún secreto del repo original.
+
+on:
+  workflow_dispatch:
+  push:
+    branches-ignore: [ main ]
+    paths-ignore:
+      - '**/*.md'
+      - 'Assets/**'
+      - 'fastlane/**'
+
+permissions:
+  contents: read
+
+jobs:
+  debug-apk:
+    name: Build debug APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v6
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Use CI Gradle properties
+        run: mkdir -p ~/.gradle && cp .github/ci-gradle.properties ~/.gradle/gradle.properties
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v6
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Build github debug APK
+        run: ./gradlew :app:assembleGithubDebug --stacktrace
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v7
+        with:
+          name: flow-debug-apk
+          path: app/build/outputs/apk/github/debug/*.apk
+          if-no-files-found: error
