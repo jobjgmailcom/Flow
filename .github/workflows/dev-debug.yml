@@ -9,14 +9,8 @@ name: Dev debug APK
 # no necesita ningún secreto del repo original.
 
 on:
+  # Solo disparo manual: nada se compila por un push.
   workflow_dispatch:
-  push:
-    branches-ignore: [ main ]
-    paths-ignore:
-      - '**/*.md'
-      - 'Assets/**'
-      - 'fastlane/**'
-
 permissions:
   contents: read
 
