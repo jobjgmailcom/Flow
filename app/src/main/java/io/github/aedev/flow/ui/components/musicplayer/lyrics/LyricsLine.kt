@@ -23,7 +23,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -32,7 +31,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
@@ -54,6 +52,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.aedev.flow.R
+import io.github.aedev.flow.data.local.LyricsAnimationStyle
+import io.github.aedev.flow.data.local.LyricsGlow
 import io.github.aedev.flow.data.lyrics.LyricsEntry
 import kotlin.math.PI
 import kotlin.math.abs
@@ -170,6 +170,8 @@ internal fun LyricsLine(
     romanizationOnly: Boolean,
     motionEnabled: Boolean,
     blurOtherLines: Boolean,
+    animationStyle: LyricsAnimationStyle,
+    glow: LyricsGlow,
     onSizeChanged: (Int) -> Unit,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
@@ -222,9 +224,13 @@ internal fun LyricsLine(
                     } else {
                         null
                     }
-            }.clip(RoundedCornerShape(8.dp))
-            .combinedClickable(onClickLabel = if (isSynced) playFromHere else null, onClick = onClick)
-            .padding(
+            }.combinedClickable(
+                interactionSource = null,
+                // Lyric lines are text, not buttons: no pressed layer, the tap just plays from the line (#2147).
+                indication = null,
+                onClickLabel = if (isSynced) playFromHere else null,
+                onClick = onClick,
+            ).padding(
                 start = 24.dp,
                 end = 24.dp,
                 top = if (item.isBackground) 0.dp else 12.dp,
@@ -250,6 +256,8 @@ internal fun LyricsLine(
                 romanization = romanization,
                 romanizationOnly = romanizationOnly,
                 motionEnabled = motionEnabled,
+                animationStyle = animationStyle,
+                glow = glow,
             )
         }
 
@@ -284,6 +292,8 @@ private fun LyricBody(
     romanization: String?,
     romanizationOnly: Boolean,
     motionEnabled: Boolean,
+    animationStyle: LyricsAnimationStyle,
+    glow: LyricsGlow,
 ) {
     val lineDistance = abs(index - displayedCurrentLineIndex)
     val alignment =
@@ -370,6 +380,8 @@ private fun LyricBody(
                 syncOffsetMs = syncOffsetMs,
                 positionProvider = positionProvider,
                 motionEnabled = motionEnabled,
+                animationStyle = animationStyle,
+                glow = glow,
             )
         } else {
             Text(

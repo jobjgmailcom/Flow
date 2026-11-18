@@ -20,6 +20,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
@@ -36,6 +37,7 @@ import coil3.imageLoader
 import coil3.request.ImageRequest
 import io.github.aedev.flow.data.local.MusicPlayerBackgroundStyle
 import io.github.aedev.flow.ui.components.musicplayer.common.PlayerBackdropColors
+import io.github.aedev.flow.ui.theme.MusicPlayerTrueBlack
 
 @Composable
 fun PlayerBackground(
@@ -49,6 +51,12 @@ fun PlayerBackground(
     animatedArtwork: (@Composable () -> Unit)? = null,
     // Covers to have ready in Coil's memory, for a layout whose artwork box doesn't load its neighbours.
     preloadCovers: List<String> = emptyList(),
+    // Shapes only: whose shape the background draws.
+    trackId: String = "",
+    // Moving colours only: whether the field may drift, false while the player is hidden or the song paused.
+    motionRunning: Boolean = false,
+    // Immersive only: the scrim's alpha over the cover, read while drawing so a fade never recomposes.
+    dim: () -> Float = { 0f },
 ) {
     val context = LocalContext.current
     LaunchedEffect(preloadCovers) { preloadCovers.forEach { context.imageLoader.execute(ImageRequest.Builder(context).data(it).build()) } }
@@ -61,16 +69,33 @@ fun PlayerBackground(
             modifier
                 .fillMaxSize()
                 .background(
-                    if (style == MusicPlayerBackgroundStyle.DEFAULT) {
-                        MaterialTheme.colorScheme.surface
-                    } else {
-                        ground
+                    when (style) {
+                        MusicPlayerBackgroundStyle.DEFAULT -> MaterialTheme.colorScheme.surface
+                        MusicPlayerBackgroundStyle.BLACK -> MusicPlayerTrueBlack
+                        else -> ground
                     },
                 ),
     ) {
         when (style) {
-            MusicPlayerBackgroundStyle.DEFAULT -> {
+            MusicPlayerBackgroundStyle.DEFAULT, MusicPlayerBackgroundStyle.BLACK -> {
                 Unit
+            }
+
+            MusicPlayerBackgroundStyle.COLOR -> {
+                Box(modifier = Modifier.fillMaxSize().background(baseColor))
+            }
+
+            MusicPlayerBackgroundStyle.COVER_COLOURS, MusicPlayerBackgroundStyle.MOVING_COLOURS -> {
+                CoverColoursLayer(
+                    thumbnailUrl = thumbnailUrl,
+                    ground = ground,
+                    moving = style == MusicPlayerBackgroundStyle.MOVING_COLOURS,
+                    running = motionRunning,
+                )
+            }
+
+            MusicPlayerBackgroundStyle.SHAPES -> {
+                CoverShapesLayer(trackId = trackId, own = backdrop.accent, partner = backdrop.base)
             }
 
             MusicPlayerBackgroundStyle.BLUR -> {
@@ -122,6 +147,14 @@ fun PlayerBackground(
                                         ),
                                 ),
                             ),
+                )
+                val scrim = MaterialTheme.colorScheme.scrim
+                Box(
+                    modifier =
+                        Modifier.fillMaxSize().drawBehind {
+                            val alpha = dim()
+                            if (alpha > 0f) drawRect(scrim, alpha = alpha)
+                        },
                 )
             }
 

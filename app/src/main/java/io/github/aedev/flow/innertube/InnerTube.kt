@@ -404,9 +404,10 @@ class InnerTube {
         channelId: String,
         query: String,
         continuation: String? = null,
+        searchLocale: YouTubeLocale = locale,
     ) = webBrowse(client) { requestVisitorData ->
         BrowseBody(
-            context = client.toContext(locale, requestVisitorData, null),
+            context = client.toContext(searchLocale, requestVisitorData, null),
             browseId = if (continuation == null) channelId else null,
             params = if (continuation == null) "EgZzZWFyY2jyBgQKAloA" else null,
             query = if (continuation == null) query else null,
@@ -825,9 +826,11 @@ class InnerTube {
     suspend fun getLiveChat(
         continuation: String,
         offsetMs: Long? = null,
+        replay: Boolean = false,
     ) = withRetry {
         val client = YouTubeClient.WEB
-        httpClient.post("https://www.youtube.com/youtubei/v1/live_chat/get_live_chat") {
+        val endpoint = if (replay) "get_live_chat_replay" else "get_live_chat"
+        httpClient.post("https://www.youtube.com/youtubei/v1/live_chat/$endpoint") {
             webYouTubeHeaders(client)
             setBody(
                 GetLiveChatBody(

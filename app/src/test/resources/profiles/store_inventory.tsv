@@ -21,6 +21,7 @@ prefs_datastore	scrobbling	main:data/scrobble/ScrobbleStore.kt	PROFILE	private	P
 prefs_datastore	discord_presence	github:discord/DiscordPreferences.kt	PROFILE	private	A personal Discord link.
 prefs_datastore	sync_identity	main:sync/identity/DeviceIdentity.kt	DEVICE	-	Device id and name.
 prefs_datastore	linked_device	main:sync2/device/DeviceKeys.kt	DEVICE	-	Linked-devices keys, sealed by the Keystore; one roster member per install.
+prefs_datastore	linked_lan_met	main:sync2/lan/LanMet.kt	DEVICE	-	When this device last synced with each linked device on its network; never synced or backed up.
 prefs_datastore	sync_brain_crdt	main:sync/merge/BrainCrdtStore.kt	PROFILE	private	Bound to the profile's brain, which syncs under its own link.
 prefs_datastore	sync_music_brain_crdt	main:sync/merge/MusicBrainCrdtStore.kt	PROFILE	private	Bound to the profile's music brain, which syncs under its own link.
 prefs_datastore	widget_content	main:widget/core/refresh/WidgetContentSync.kt	DEVICE	-	Mirrors what the launcher shows; cleared on switch so every widget redraws.
@@ -34,7 +35,6 @@ shared_prefs	youtube_identity	main:utils/potoken/VisitorIdentityStore.kt	PROFILE
 shared_prefs	flow_prefs	main:utils/potoken/VisitorIdentityStore.kt	DEVICE	-	Only deletes the legacy visitor keys.
 shared_prefs	flow_prefs	main:utils/cipher/PipePipeNsigDecoder.kt	DEVICE	-	Player-JS id cache with a 24 h lifetime.
 shared_prefs	flow_language_prefs	main:utils/AppLanguageManager.kt	DEVICE	-	App language.
-shared_prefs	flow_storage_prefs	main:ui/components/shared/DownloadLauncher.kt	DEVICE	-	Storage permission prompt.
 shared_prefs	flow_crash_prefs	main:utils/FlowCrashHandler.kt	DEVICE	-	Crash reports.
 shared_prefs	music_home_cache_prefs	main:data/recommendation/MusicRecommendationAlgorithm.kt	CACHE	-	Freshness of the music home rows, which sit in each profile's database; suffixed per profile.
 shared_prefs	flow_file_tombstones	main:data/video/VideoDownloadManager.kt	DEVICE	-	Deleted download paths.
@@ -91,6 +91,7 @@ files_dir	local_embedded_tags.json	main:data/localmedia/LocalEmbeddedTags.kt	DEV
 files_dir	local_subtitles.json	main:data/localmedia/LocalSubtitleStore.kt	DEVICE	-	Subtitle choices for local media.
 files_dir	fake_stream_wall, fake_stream_wall_all	main:player/datasource/FakeStreamWallDataSource.kt	DEVICE	-	Debug switch files.
 no_backup_dir	headphone_resume_off	main:service/HeadphoneResume.kt	DEVICE	-	Player control; written during a switch so no headset resumes.
+no_backup_dir	aislist/	main:data/contentfilter/aislist/AiListRepository.kt	DEVICE	-	AiSList channel list and its handle index; re-downloadable, the same for every profile, never backed up or synced.
 cache_dir	innertube_http_cache/	main:FlowApplication.kt	CACHE	-	Deleted at switch: suggestion and sw.js_data GETs might be stored.
 cache_dir	recap/, lyrics/	main:utils/SharedFiles.kt	CACHE	-	Share images from the active profile; deleted at switch.
 cache_dir	image_cache/	main:di/AppModule.kt	CACHE	-	Thumbnails; shared.

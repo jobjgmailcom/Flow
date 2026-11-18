@@ -224,6 +224,16 @@ project-operated proxy or relay in between.
 - `sponsor.ajay.app` and `dearrow-thumb.ajay.app`: SponsorBlock and DeArrow, only if the user turns
   them on.
 - `returnyoutubedislikeapi.com`: Return YouTube Dislike, only if the user turns it on.
+- `ailist.flow-tube.org`, or a server the user enters instead: the AiSList channel list and the AI
+  music artist list, each about once a day and only while its filter is on. The requests carry no
+  identifier; matching runs on device.
+- `api.aisloplist.com`: AiSList reports, only when the user turns reporting on and confirms a report.
+  It receives the channel handle, the video link and the submitter name the user chose, which AiSList
+  shows on its public leaderboard.
+- A LibreTranslate or Lingva server the user enters, only when the user sets one and taps Translate.
+  It receives the text being translated, the target language and, for LibreTranslate, the API key
+  the user entered. Flow has no translation server of its own; without one, Translate hands the
+  text to the translator app the user picks on the device.
 - `api.github.com` and `github.com`: release check and changelog, `github` flavor only.
 - `discord.com`: rich presence, `github` flavor only, and only after the user links an account.
 - Local network addresses: DLNA renderers on the LAN, and the peer device during Device Sync.

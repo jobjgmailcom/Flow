@@ -51,14 +51,16 @@ fun translatedLocaleTags(): List<String> =
 
 android {
     namespace = "io.github.aedev.flow"
-    compileSdk = 37
+    compileSdk {
+        version = release(37) { minorApiLevel = 1 }
+    }
 
     defaultConfig {
         applicationId = "io.github.aedev.flow"
         minSdk = 26
         targetSdk = 36
-        versionCode = 19
-        versionName = "3.0.0"
+        versionCode = 20
+        versionName = "3.0.5"
 
         buildConfigField("int", "NIGHTLY_RUN", "0")
         buildConfigField("String", "APP_LANGUAGE_TAGS", "\"${(listOf("en") + translatedLocaleTags()).joinToString(",")}\"")
