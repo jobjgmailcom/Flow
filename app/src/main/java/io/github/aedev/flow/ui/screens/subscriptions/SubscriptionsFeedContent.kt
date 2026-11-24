@@ -30,7 +30,6 @@ import io.github.aedev.flow.ui.components.rememberFeedGridLayout
 import io.github.aedev.flow.ui.components.shared.FlowPullToRefreshBox
 import io.github.aedev.flow.ui.components.shared.MediaShortsShelf
 import io.github.aedev.flow.ui.components.shared.card.MediaVideoCard
-import io.github.aedev.flow.ui.components.shared.card.VideoCardLayout
 import io.github.aedev.flow.ui.components.shared.dpadFocusGroup
 import io.github.aedev.flow.ui.components.shared.rememberFeedGridPlan
 
@@ -63,6 +62,7 @@ internal fun SubscriptionsFeedContent(
     onPostsClick: (() -> Unit)? = null,
     pinnedCount: Int = 0,
     onTogglePin: ((Channel) -> Unit)? = null,
+    topPadding: Dp = 0.dp,
 ) {
     val pullRefreshState = rememberPullToRefreshState()
 
@@ -76,6 +76,7 @@ internal fun SubscriptionsFeedContent(
         isRefreshing = state.isLoading,
         onRefresh = onRefresh,
         state = pullRefreshState,
+        indicatorTopPadding = topPadding,
         modifier = modifier.fillMaxSize(),
     ) {
         BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
@@ -89,16 +90,15 @@ internal fun SubscriptionsFeedContent(
                     spansOwnRow = { false },
                     includeLastRun = true,
                     itemsKey = videos,
-                    compactRowSpacing = if (listMode) 0.dp else feedLayout.cardSpacing,
                 )
             LazyVerticalGrid(
                 columns = plan.cells,
                 state = gridState,
                 modifier = Modifier.fillMaxSize().dpadFocusGroup(),
-                contentPadding = plan.contentPadding(top = FeedTopPadding, bottom = flowBottomContentPadding()),
+                contentPadding = plan.contentPadding(top = FeedTopPadding + topPadding, bottom = flowBottomContentPadding()),
                 verticalArrangement = Arrangement.spacedBy(plan.rowSpacing),
             ) {
-                item(span = { GridItemSpan(maxLineSpan) }) {
+                item(key = "subscriptions_header", contentType = "subscriptions_header", span = { GridItemSpan(maxLineSpan) }) {
                     Column {
                         SubscriptionsFeedHeader(
                             state = state,
@@ -138,7 +138,7 @@ internal fun SubscriptionsFeedContent(
                 }
 
                 if (showShorts && state.isShortsShelfEnabled && state.shorts.isNotEmpty()) {
-                    item(span = { GridItemSpan(maxLineSpan) }) {
+                    item(key = "subscriptions_shorts", contentType = "subscriptions_shorts", span = { GridItemSpan(maxLineSpan) }) {
                         Column {
                             MediaShortsShelf(
                                 shorts = state.shorts,
@@ -157,16 +157,13 @@ internal fun SubscriptionsFeedContent(
                 itemsIndexed(
                     items = videos,
                     key = { _, video -> video.id },
-                    contentType = { _, _ -> "video" },
+                    contentType = { index, _ -> if (plan.isListCard(index)) "video_row" else "video_stacked" },
                     span = { index, _ -> plan.span(index, spansOwnRow = false, maxLineSpan = maxLineSpan) },
                 ) { index, video ->
                     MediaVideoCard(
                         video = video,
-                        layout = if (plan.isListCard(index)) VideoCardLayout.Row else VideoCardLayout.Stacked,
+                        spec = plan.videoCard(index),
                         onClick = { onVideoClick(video) },
-                        useInternalPadding = !feedLayout.cardsBleed,
-                        thumbnailWidth = plan.listThumbnailWidth,
-                        density = plan.cardDensity,
                     )
                 }
             }

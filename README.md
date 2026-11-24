@@ -111,27 +111,32 @@ Flow gives you both. The recommendation engine learns what you like by analyzing
       <td align="center"><b>Video Player</b><br><img src="Assets/VideoPlayer.jpeg" width="240"></td>
       <td align="center"><b>Shorts</b><br><img src="Assets/Shorts.jpeg" width="240"></td>
     </tr>
-    <tr>
-      <td align="center"><b>Subscriptions</b><br><img src="Assets/Subscriptions.jpeg" width="240"></td>
-      <td align="center"><b>Channel View</b><br><img src="Assets/Channel.jpeg" width="240"></td>
-      <td align="center"><b>Playlist</b><br><img src="Assets/Playlist.jpeg" width="240"></td>
-    </tr>
-    <tr>
-      <td align="center"><b>Music Hub</b><br><img src="Assets/Music.jpeg" width="240"></td>
-      <td align="center"><b>Music Player</b><br><img src="Assets/MusicPlayer.jpeg" width="240"></td>
-      <td align="center"><b>Lyrics</b><br><img src="Assets/Lyrics.jpeg" width="240"></td>
-    </tr>
-    <tr>
-      <td align="center"><b>Artist Page</b><br><img src="Assets/Artist.jpeg" width="240"></td>
-      <td align="center"><b>Album</b><br><img src="Assets/Album.jpeg" width="240"></td>
-      <td align="center"><b>Your Library</b><br><img src="Assets/Library.jpeg" width="240"></td>
-    </tr>
-    <tr>
-      <td align="center"><b>Your Taste</b><br><img src="Assets/YourTaste.jpeg" width="240"></td>
-      <td align="center"></td>
-      <td align="center"></td>
-    </tr>
   </table>
+  <details>
+    <summary><b>More screenshots</b></summary>
+    <table>
+      <tr>
+        <td align="center"><b>Subscriptions</b><br><img src="Assets/Subscriptions.jpeg" width="240"></td>
+        <td align="center"><b>Channel View</b><br><img src="Assets/Channel.jpeg" width="240"></td>
+        <td align="center"><b>Playlist</b><br><img src="Assets/Playlist.jpeg" width="240"></td>
+      </tr>
+      <tr>
+        <td align="center"><b>Music Hub</b><br><img src="Assets/Music.jpeg" width="240"></td>
+        <td align="center"><b>Music Player</b><br><img src="Assets/MusicPlayer.jpeg" width="240"></td>
+        <td align="center"><b>Lyrics</b><br><img src="Assets/Lyrics.jpeg" width="240"></td>
+      </tr>
+      <tr>
+        <td align="center"><b>Artist Page</b><br><img src="Assets/Artist.jpeg" width="240"></td>
+        <td align="center"><b>Album</b><br><img src="Assets/Album.jpeg" width="240"></td>
+        <td align="center"><b>Your Library</b><br><img src="Assets/Library.jpeg" width="240"></td>
+      </tr>
+      <tr>
+        <td align="center"><b>Your Taste</b><br><img src="Assets/YourTaste.jpeg" width="240"></td>
+        <td align="center"></td>
+        <td align="center"></td>
+      </tr>
+    </table>
+  </details>
 </div>
 
 ---
@@ -211,7 +216,7 @@ If you already use crypto, you can send it directly to my wallets below:
 
 Flow stands on the shoulders of giants. Special thanks to:
 
-*   **[NewPipeExtractor](https://github.com/TeamNewPipe/NewPipeExtractor):** The backbone of our data extraction.
+*   **[NewPipeExtractor](https://github.com/TeamNewPipe/NewPipeExtractor):** Where Flow's data extraction began, and the source of the relative-date word lists Flow still ships.
 *   **[NewPipe](https://github.com/TeamNewPipe/NewPipe):** For inspiration from their solid foundation for YouTube data handling.
 *   **[PipePipe](https://codeberg.org/NullPointerException/PipePipe):** For their SABR and InnerTube playback implementation, which guided Flow's YouTube streaming pipeline.
 *   **[PipePipe Developer Docs](https://priveetee.github.io/Docs-PipePipe/):** For their reference documentation on SABR, BotGuard/PoToken attestation, and InnerTube extraction internals.

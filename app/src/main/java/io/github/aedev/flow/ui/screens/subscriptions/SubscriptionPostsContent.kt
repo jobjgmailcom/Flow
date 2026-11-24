@@ -19,6 +19,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.paging.LoadState
@@ -36,6 +37,7 @@ import io.github.aedev.flow.ui.components.shared.FlowLoadingIndicator
 import io.github.aedev.flow.ui.components.shared.FlowPullToRefreshBox
 import io.github.aedev.flow.ui.components.shared.MediaPostCard
 import io.github.aedev.flow.ui.components.shared.MediaPostCommentsSheet
+import io.github.aedev.flow.ui.components.shared.RetryWhenBackOnline
 import io.github.aedev.flow.ui.components.shared.rememberPostShareAction
 
 private val PostsMaxWidth = 760.dp
@@ -53,11 +55,13 @@ internal fun SubscriptionPostsContent(
     onVideoClick: (Video) -> Unit,
     header: @Composable () -> Unit,
     modifier: Modifier = Modifier,
+    topPadding: Dp = 0.dp,
     viewModel: SubscriptionPostsViewModel = hiltViewModel(),
 ) {
     LaunchedEffect(channelIds) { viewModel.show(channelIds) }
     val posts = viewModel.posts.collectAsLazyPagingItems()
     val sharePost = rememberPostShareAction()
+    RetryWhenBackOnline(posts)
     val refreshState = posts.loadState.refresh
     val appendState = posts.loadState.append
     var userRefreshing by remember { mutableStateOf(false) }
@@ -73,12 +77,13 @@ internal fun SubscriptionPostsContent(
                 viewModel.forgetCachedPosts()
                 posts.refresh()
             },
+            indicatorTopPadding = topPadding,
             modifier = Modifier.fillMaxSize(),
         ) {
             LazyColumn(
                 state = listState,
                 modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(bottom = flowBottomContentPadding()),
+                contentPadding = PaddingValues(top = topPadding, bottom = flowBottomContentPadding()),
             ) {
                 item(key = "posts_header", contentType = "header") { header() }
 

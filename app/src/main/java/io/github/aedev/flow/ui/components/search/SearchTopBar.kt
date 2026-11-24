@@ -40,11 +40,12 @@ fun SearchTopBar(
     textFieldState: TextFieldState,
     onSearch: (String) -> Unit,
     onBack: () -> Unit,
-    onVoiceSearch: () -> Unit,
+    onVoiceSearch: (() -> Unit)?,
     modifier: Modifier = Modifier,
     focusRequester: FocusRequester? = null,
     onFieldFocused: () -> Unit = {},
     actions: (@Composable () -> Unit)? = null,
+    privateKeyboard: Boolean = false,
 ) {
     Row(
         modifier = modifier.fillMaxWidth().padding(horizontal = BarHorizontalPadding, vertical = BarVerticalPadding),
@@ -65,13 +66,16 @@ fun SearchTopBar(
             onSearch = onSearch,
             focusRequester = focusRequester,
             onFieldFocused = onFieldFocused,
+            privateKeyboard = privateKeyboard,
         )
 
-        IconButton(onClick = onVoiceSearch) {
-            Icon(
-                imageVector = Icons.Rounded.Mic,
-                contentDescription = stringResource(R.string.voice_search_cd),
-            )
+        if (onVoiceSearch != null) {
+            IconButton(onClick = onVoiceSearch) {
+                Icon(
+                    imageVector = Icons.Rounded.Mic,
+                    contentDescription = stringResource(R.string.voice_search_cd),
+                )
+            }
         }
 
         actions?.invoke()

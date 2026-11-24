@@ -30,9 +30,10 @@ import io.github.aedev.flow.ui.components.shared.FeedGridTopPadding
 import io.github.aedev.flow.ui.components.shared.FeedPagingFooter
 import io.github.aedev.flow.ui.components.shared.FlowEmptyState
 import io.github.aedev.flow.ui.components.shared.FlowErrorState
+import io.github.aedev.flow.ui.components.shared.RetryWhenBackOnline
 import io.github.aedev.flow.ui.components.shared.card.MediaVideoCard
-import io.github.aedev.flow.ui.components.shared.card.VideoCardLayout
 import io.github.aedev.flow.ui.components.shared.rememberFeedGridPlan
+import io.github.aedev.flow.utils.LoadErrorKind
 
 /** A destination shelf's "see all", paged. */
 @Composable
@@ -49,6 +50,7 @@ internal fun CategoryPagedGrid(
     // is doing — the screen's flag was cleared as soon as the pager was handed its key, and the
     // footer speaks for the append. Without this the tab is a blank screen while it loads, and
     // stays one if the first page fails or comes back empty.
+    RetryWhenBackOnline(pagingItems)
     val refresh = pagingItems.loadState.refresh
     if (pagingItems.itemCount == 0) {
         when {
@@ -58,7 +60,7 @@ internal fun CategoryPagedGrid(
 
             refresh is LoadState.Error -> {
                 FlowErrorState(
-                    error = stringResource(categoryErrorRes(refresh.error)),
+                    error = stringResource(LoadErrorKind.of(refresh.error).messageRes(R.string.error_failed_to_load_videos)),
                     onRetry = pagingItems::retry,
                     modifier = modifier,
                 )
@@ -102,10 +104,8 @@ internal fun CategoryPagedGrid(
                     val video = item.gridVideo()
                     MediaVideoCard(
                         video = video,
-                        layout = if (plan.isListCard(index)) VideoCardLayout.Row else VideoCardLayout.Stacked,
+                        spec = plan.videoCard(index),
                         onClick = { onVideoClick(video) },
-                        thumbnailWidth = plan.listThumbnailWidth,
-                        density = plan.cardDensity,
                     )
                 }
 
@@ -175,9 +175,8 @@ internal fun CategoryChartGrid(
         ) { index, video ->
             MediaVideoCard(
                 video = video,
-                layout = if (plan.isListCard(index)) VideoCardLayout.Row else VideoCardLayout.Stacked,
+                spec = plan.videoCard(index),
                 onClick = { onVideoClick(video) },
-                thumbnailWidth = plan.listThumbnailWidth,
             )
         }
     }

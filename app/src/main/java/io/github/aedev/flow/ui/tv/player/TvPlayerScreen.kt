@@ -1,7 +1,6 @@
 package io.github.aedev.flow.ui.tv.player
 
 import android.os.SystemClock
-import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
 import androidx.compose.foundation.layout.Box
@@ -9,7 +8,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,7 +33,6 @@ import io.github.aedev.flow.ui.components.shared.SaveVideoSheet
 import io.github.aedev.flow.ui.components.videoplayer.VideoPlayerSurface
 import io.github.aedev.flow.ui.components.videoplayer.controls.PlayerControlActions
 import io.github.aedev.flow.ui.components.videoplayer.overlay.AutoplayCountdownOverlay
-import io.github.aedev.flow.ui.components.videoplayer.overlay.SponsorBlockSkipButton
 import io.github.aedev.flow.ui.components.videoplayer.subtitle.Media3SubtitleOverlay
 import io.github.aedev.flow.ui.screens.player.VideoPlayerViewModel
 import io.github.aedev.flow.ui.screens.player.effects.KeepScreenOnEffect
@@ -92,13 +89,13 @@ fun TvPlayerScreen(
     val playPauseFocusRequester = remember { FocusRequester() }
     val upNextFocusRequester = remember { FocusRequester() }
     val countdownFocusRequester = remember { FocusRequester() }
+    val errorFocusRequester = remember { FocusRequester() }
     var seekBarFocused by remember { mutableStateOf(false) }
     var upNextShown by remember { mutableStateOf(false) }
     var pendingFocusTarget by remember { mutableStateOf(TvPlayerFocusTarget.PLAY_PAUSE) }
 
     val autoplayCountdown by manager.autoplayCountdown.collectAsStateWithLifecycle()
     val sponsorSegments by manager.sponsorSegments.collectAsStateWithLifecycle()
-    val sponsorSkippedOnce by manager.sbSkippedOnce.collectAsStateWithLifecycle()
     val queueVideos by manager.queueVideos.collectAsStateWithLifecycle()
     val currentQueueIndex by manager.currentQueueIndexState.collectAsStateWithLifecycle()
 
@@ -225,7 +222,11 @@ fun TvPlayerScreen(
         remember {
             TvPlayerInput(
                 overlayMode = {
-                    if (manager.autoplayCountdown.value.isActive) TvOverlayMode.PANEL else overlayController.state.value.mode
+                    tvPlayerInputMode(
+                        overlayMode = overlayController.state.value.mode,
+                        countdownActive = manager.autoplayCountdown.value.isActive,
+                        errorShown = viewModel.uiState.value.error != null,
+                    )
                 },
                 seekBarFocused = { seekBarFocused },
                 isScrubbing = { scrubController.current.isScrubbing },
@@ -242,7 +243,7 @@ fun TvPlayerScreen(
     TvOverlayAutoHideEffect(overlayController, overlayState, playerState.isPlaying, scrubUiState.isScrubbing)
     TvOverlayFocusEffect(
         mode = overlayState.mode,
-        rootFocusRequester = rootFocusRequester,
+        hiddenTarget = { if (viewModel.uiState.value.error != null) errorFocusRequester else rootFocusRequester },
         transportTarget = {
             val target = pendingFocusTarget
             pendingFocusTarget = TvPlayerFocusTarget.PLAY_PAUSE
@@ -255,32 +256,19 @@ fun TvPlayerScreen(
         onHidden = { upNextShown = false },
     )
 
-    LaunchedEffect(video.id) {
-        rootFocusRequester.requestFocus()
-    }
-    LaunchedEffect(upNextShown) {
-        if (upNextShown && overlayController.state.value.mode == TvOverlayMode.TRANSPORT) upNextFocusRequester.requestFocus()
-    }
-    LaunchedEffect(autoplayCountdown.isActive) {
-        if (autoplayCountdown.isActive) countdownFocusRequester.requestFocus()
-    }
-
-    BackHandler {
-        when {
-            scrubController.current.isScrubbing -> {
-                scrubController.cancel()
-                scrubUiState = scrubController.current
-            }
-
-            overlayController.state.value.mode == TvOverlayMode.PANEL -> {
-                closeSheet()
-            }
-
-            !overlayController.onBack() -> {
-                onClose()
-            }
-        }
-    }
+    TvPlayerFocusRequests(
+        videoId = video.id,
+        upNextShown = upNextShown,
+        countdownActive = autoplayCountdown.isActive,
+        errorShown = uiState.error != null,
+        overlayMode = { overlayController.state.value.mode },
+        focus = TvPlayerFocusRequesters(rootFocusRequester, upNextFocusRequester, countdownFocusRequester, errorFocusRequester),
+        onErrorShown = {
+            if (overlayController.state.value.mode == TvOverlayMode.PANEL) closeSheet()
+            overlayController.hide()
+        },
+    )
+    TvPlayerBackHandler(scrubController, overlayController, { scrubUiState = scrubController.current }, ::closeSheet, onClose)
 
     Box(
         modifier =
@@ -298,6 +286,7 @@ fun TvPlayerScreen(
             resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT,
             modifier = Modifier.fillMaxSize(),
             ambientMode = prefs.ambientModeEnabled,
+            tvInterface = true,
         )
         Media3SubtitleOverlay(
             enabled = playerState.selectedSubtitleUrl != null,
@@ -356,18 +345,12 @@ fun TvPlayerScreen(
             onChannelClick = { onOpenChannel(video.channelId) },
         )
 
-        SponsorBlockSkipButton(
+        TvSponsorSkipButton(
             sponsorSegments = sponsorSegments,
-            currentPositionMs = (screenState.currentPosition / 1_000L) * 1_000L,
-            categoryActions = manager.sbCategoryActions,
-            skippedOnceUuids = sponsorSkippedOnce,
+            positionMs = { screenState.currentPosition },
             controlsVisible = overlayState.mode != TvOverlayMode.HIDDEN,
             playbackEnded = playerState.hasEnded,
-            onSkipClick = manager::skipToSegmentEnd,
-            modifier =
-                Modifier
-                    .align(Alignment.TopEnd)
-                    .padding(LocalTvDimens.current.overscanHorizontal),
+            modifier = Modifier.align(Alignment.TopEnd).padding(LocalTvDimens.current.overscanHorizontal),
         )
 
         TvPlayerSheets(
@@ -392,6 +375,8 @@ fun TvPlayerScreen(
                     (uiState.isLoading || playerState.isBuffering),
             error = uiState.error?.let { error -> uiState.errorHint?.let { hint -> "$error\n$hint" } ?: error },
             onRetry = viewModel::retryLoadVideo,
+            onResetSession = if (uiState.errorOffersSessionReset) ({ viewModel.resetSessionAndRetry() }) else null,
+            errorFocusRequester = errorFocusRequester,
             modifier = Modifier.align(Alignment.Center),
         )
     }

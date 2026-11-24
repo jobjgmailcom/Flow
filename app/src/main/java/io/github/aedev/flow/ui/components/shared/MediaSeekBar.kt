@@ -35,11 +35,12 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import io.github.aedev.flow.data.model.SponsorBlockSegment
+import io.github.aedev.flow.innertube.models.response.VideoChapter
 import io.github.aedev.flow.ui.theme.PlayerScrimContent
-import org.schabi.newpipe.extractor.stream.StreamSegment
 
 private val EdgeAlignedHeight = 14.dp
 private val ExpandedRowHeight = 32.dp
@@ -79,7 +80,7 @@ fun MediaSeekBar(
     enabled: Boolean = true,
     onValueChangeFinished: (() -> Unit)? = null,
     interactionSource: MutableInteractionSource = remember { MutableInteractionSource() },
-    chapters: List<StreamSegment> = emptyList(),
+    chapters: List<VideoChapter> = emptyList(),
     sponsorSegments: List<SponsorBlockSegment> = emptyList(),
     /**
      * Per-category colour overrides chosen by the user in SponsorBlock settings. Categories absent
@@ -91,6 +92,8 @@ fun MediaSeekBar(
     duration: Long = 0L,
     bufferedValue: Float = 0f,
     edgeAligned: Boolean = false,
+    /** The edge-aligned strip's touch height; the track still sits on its bottom edge. */
+    edgeAlignedHeight: Dp = EdgeAlignedHeight,
 ) {
     val primaryColor = MaterialTheme.colorScheme.primary
     val thumbFillColor = MaterialTheme.colorScheme.surface
@@ -181,7 +184,7 @@ fun MediaSeekBar(
             modifier =
                 Modifier
                     .fillMaxWidth()
-                    .height(if (edgeAligned) EdgeAlignedHeight else ExpandedRowHeight),
+                    .height(if (edgeAligned) edgeAlignedHeight else ExpandedRowHeight),
             contentAlignment = if (edgeAligned) Alignment.BottomCenter else Alignment.Center,
         ) {
             if (edgeAligned) {

@@ -15,30 +15,11 @@
     public static int d(...);
 }
 
-## Rules for NewPipeExtractor
--keep class org.schabi.newpipe.extractor.timeago.patterns.** { *; }
--keep class org.schabi.newpipe.extractor.** { *; }
--keep class com.grack.nanojson.** { *; }
--keep class org.schabi.newpipe.extractor.services.** { *; }
--keep class * extends org.schabi.newpipe.extractor.Extractor { *; }
--keep class * implements org.schabi.newpipe.extractor.Service { *; }
 -keepattributes Exceptions, InnerClasses
-
-## Rules for Rhino and Rhino Engine (JavaScript engine used by NewPipe)
--keep class org.mozilla.javascript.* { *; }
--keep class org.mozilla.javascript.** { *; }
--keep class org.mozilla.javascript.engine.** { *; }
--keep class org.mozilla.classfile.ClassFileWriter
--dontwarn org.mozilla.javascript.JavaToJSONConverters
--dontwarn org.mozilla.javascript.tools.**
--keep class javax.script.** { *; }
--dontwarn javax.script.**
--dontwarn jdk.dynalink.**
 
 ## Rules for Gson serialization
 -keepattributes Signature
 -keepattributes *Annotation*
--keep class com.google.gson.** { *; }
 -keep class * implements com.google.gson.TypeAdapter
 -keep class * implements com.google.gson.TypeAdapterFactory
 -keep class * implements com.google.gson.JsonSerializer
@@ -51,7 +32,6 @@
 -keep class io.github.aedev.flow.data.model.** { *; }
 -keep class io.github.aedev.flow.data.local.** { *; }
 -keep class io.github.aedev.flow.data.lyrics.** { *; }
--keep class io.github.aedev.flow.innertube.models.** { *; }
 
 ## Gson-persisted models that live OUTSIDE the packages above (issue #996): without an
 ## explicit keep, R8 may strip the generic Signature of MusicTrack.artists, and cached
@@ -74,16 +54,10 @@
 
 ## Rules for Ktor
 -dontwarn io.ktor.**
--keep class io.ktor.** { *; }
 
-## Rules for Brotli & re2j
+## Rules for Brotli
 -dontwarn org.brotli.**
--keep class org.brotli.** { *; }
 -dontwarn org.conscrypt.**
--dontwarn com.google.re2j.**
--keep class com.google.re2j.** { *; }
--dontwarn org.jsoup.helper.Re2jRegex
--dontwarn org.jsoup.helper.Re2jRegex$Re2jMatcher
 
 ## Third-party / Platform warning suppressions
 -dontwarn okhttp3.**

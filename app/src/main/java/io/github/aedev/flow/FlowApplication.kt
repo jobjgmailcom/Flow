@@ -1,7 +1,6 @@
 package io.github.aedev.flow
 
 import android.app.Application
-import android.content.ComponentCallbacks2
 import android.content.Context
 import android.util.Log
 import androidx.compose.material3.ComposeMaterial3Flags
@@ -22,7 +21,7 @@ import io.github.aedev.flow.data.profile.ProfileSlices
 import io.github.aedev.flow.data.profile.ProfileWebView
 import io.github.aedev.flow.data.profile.ProfileWorkReconciler
 import io.github.aedev.flow.data.recommendation.FlowNeuroEngine
-import io.github.aedev.flow.data.repository.NewPipeDownloader
+import io.github.aedev.flow.data.repository.YouTubePlaylistRepository
 import io.github.aedev.flow.data.repository.YouTubeRepository
 import io.github.aedev.flow.discord.DiscordPresenceRuntime
 import io.github.aedev.flow.innertube.YouTube
@@ -45,9 +44,6 @@ import io.github.aedev.flow.utils.FlowCrashHandler
 import io.github.aedev.flow.utils.PerformanceDispatcher
 import io.github.aedev.flow.utils.cipher.PipePipeNsigDecoder
 import io.github.aedev.flow.utils.contentYouTubeLocale
-import io.github.aedev.flow.utils.newPipeContentCountry
-import io.github.aedev.flow.utils.newPipeLocalization
-import io.github.aedev.flow.utils.potoken.NewPipePoTokenProvider
 import io.github.aedev.flow.utils.potoken.VisitorIdentityStore
 import io.github.aedev.flow.utils.potoken.WebPoTokenSession
 import kotlinx.coroutines.CoroutineScope
@@ -65,11 +61,6 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
-import org.conscrypt.Conscrypt
-import org.schabi.newpipe.extractor.NewPipe
-import org.schabi.newpipe.extractor.localization.ContentCountry
-import org.schabi.newpipe.extractor.services.youtube.extractors.YoutubeStreamExtractor
-import java.security.Security
 import java.util.Locale
 import javax.inject.Inject
 
@@ -82,6 +73,9 @@ class FlowApplication :
 
     @Inject
     lateinit var okHttpClient: OkHttpClient
+
+    @Inject
+    lateinit var playlistRepository: YouTubePlaylistRepository
 
     @Inject
     lateinit var vpnStateMonitor: VpnStateMonitor
@@ -153,29 +147,8 @@ class FlowApplication :
 
         val playerPreferences = PlayerPreferences(this)
 
-        // Injects modern TLS/SSL certificates so OkHttp and Ktor don't crash
-        if (android.os.Build.VERSION.SDK_INT <= android.os.Build.VERSION_CODES.N_MR1) {
-            Security.insertProviderAt(Conscrypt.newProvider(), 1)
-        }
-
         // Install crash handler for real-time monitoring
         FlowCrashHandler.install(this)
-
-        try {
-            // Seeded from the device locale so the very first extraction is already localized; the
-            // stored app-language/region preference takes over as soon as it loads below.
-            val localization = newPipeLocalization(Locale.getDefault().toLanguageTag())
-            NewPipe.init(
-                NewPipeDownloader.getInstance(this),
-                localization,
-                newPipeContentCountry(Locale.getDefault().country),
-            )
-            YoutubeStreamExtractor.setPoTokenProvider(NewPipePoTokenProvider)
-            Log.d(TAG, "NewPipe initialized with ${localization.localizationCode}")
-        } catch (e: Exception) {
-            // Log error but don't crash the app
-            Log.e(TAG, "Failed to initialize NewPipe", e)
-        }
 
         try {
             io.github.aedev.flow.utils.cipher.CipherDeobfuscator
@@ -263,10 +236,6 @@ class FlowApplication :
                 contentYouTubeLocale(appLanguage, contentLanguage, region, AppLanguageManager.deviceLocale(this@FlowApplication))
             }.distinctUntilChanged().collectLatest { newLocale ->
                 YouTube.locale = newLocale
-                NewPipe.setupLocalization(
-                    newPipeLocalization(newLocale.hl),
-                    ContentCountry(newLocale.gl),
-                )
                 Log.d(TAG, "Dynamic YouTube Locale updated: gl=${newLocale.gl}, hl=${newLocale.hl}")
                 homeFeedLanguageReset.onContentLanguage(newLocale.hl)
             }
@@ -336,19 +305,16 @@ class FlowApplication :
         releaseVolatileMemory()
     }
 
-    @Suppress("DEPRECATION")
     override fun onTrimMemory(level: Int) {
         super.onTrimMemory(level)
         FlowCrashHandler.recordPhase("memory", "FlowApplication.onTrimMemory level=$level")
-        if (level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW) {
+        if (AppMemoryTrim.releasesVolatileMemory(level)) {
             releaseVolatileMemory()
         }
     }
 
     private fun releaseVolatileMemory() {
-        if (::imageLoader.isInitialized) {
-            imageLoader.memoryCache?.clear()
-        }
+        if (::playlistRepository.isInitialized) playlistRepository.trimMemory()
         if (::okHttpClient.isInitialized) {
             CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
                 okHttpClient.connectionPool.evictAll()

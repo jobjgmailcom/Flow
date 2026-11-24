@@ -3,14 +3,19 @@ package io.github.aedev.flow.ui.screens.player
 import android.util.Log
 import io.github.aedev.flow.data.local.PlayerPreferences
 import io.github.aedev.flow.data.localmedia.LocalMediaIds
+import io.github.aedev.flow.data.model.RelatedCollection
 import io.github.aedev.flow.data.model.Video
+import io.github.aedev.flow.data.model.WatchRelatedPage
 import io.github.aedev.flow.data.recommendation.FeedExclusions
+import io.github.aedev.flow.data.repository.WatchRelatedPages
 import io.github.aedev.flow.data.repository.YouTubeRepository
 import io.github.aedev.flow.innertube.models.response.PaidPromotionLabel
 import io.github.aedev.flow.innertube.models.response.VideoChapter
 import io.github.aedev.flow.innertube.models.response.VideoHeatmap
+import io.github.aedev.flow.innertube.pages.WatchPageHeader
 import io.github.aedev.flow.player.EnhancedPlayerManager
 import io.github.aedev.flow.player.PlayerRelatedVideosPolicy
+import io.github.aedev.flow.ui.screens.player.state.RelatedLanePlacement
 import io.github.aedev.flow.ui.screens.player.state.VideoPlayerUiState
 import io.github.aedev.flow.utils.OriginalTextPolicy
 import io.github.aedev.flow.utils.ThumbnailUrlResolver
@@ -41,6 +46,10 @@ internal sealed interface SecondaryMetadata {
         override val videoId: String,
         override val loadToken: Long,
         val videos: List<Video>,
+        /** Set only when YouTube's pick survived the filters and heads [videos]. */
+        val upNextVideoId: String? = null,
+        val continuation: String? = null,
+        val collections: List<RelatedCollection> = emptyList(),
     ) : SecondaryMetadata
 
     class Category(
@@ -67,6 +76,12 @@ internal sealed interface SecondaryMetadata {
         val chapters: List<VideoChapter>,
     ) : SecondaryMetadata
 
+    class WatchHeader(
+        override val videoId: String,
+        override val loadToken: Long,
+        val header: WatchPageHeader,
+    ) : SecondaryMetadata
+
     class WatchInfo(
         override val videoId: String,
         override val loadToken: Long,
@@ -85,7 +100,7 @@ internal sealed interface SecondaryMetadata {
 
 /**
  * The metadata the player screen wants *after* the first frame: the channel avatar and subscriber
- * count, the related lane, the late NewPipe enrichment of an InnerTube-only load, and the live
+ * count, the related lane, the late enrichment of an InnerTube-only load, and the live
  * watch refresh.
  *
  * Each concern holds at most one job, keyed by the video and the load it belongs to: a repeat call
@@ -94,6 +109,7 @@ internal sealed interface SecondaryMetadata {
  */
 internal class PlayerSecondaryMetadataLoader(
     private val repository: YouTubeRepository,
+    private val relatedPages: WatchRelatedPages,
     private val playerManager: EnhancedPlayerManager,
     private val playerPreferences: PlayerPreferences,
     private val scope: CoroutineScope,
@@ -154,6 +170,7 @@ internal class PlayerSecondaryMetadataLoader(
     private val chaptersLoad = ConcurrentLoad()
     private val paidPromotionLoad = ConcurrentLoad()
     private val watchInfoLoad = ConcurrentLoad()
+    private val watchHeaderLoad = ConcurrentLoad()
 
     /** Drops every fetch in flight; the next load re-arms the ones it needs. */
     fun cancel() {
@@ -164,6 +181,7 @@ internal class PlayerSecondaryMetadataLoader(
         chaptersLoad.cancel()
         paidPromotionLoad.cancel()
         watchInfoLoad.cancel()
+        watchHeaderLoad.cancel()
     }
 
     /**
@@ -205,6 +223,25 @@ internal class PlayerSecondaryMetadataLoader(
                         ?.takeIf { !it.isEmpty } ?: return@launch
                 if (!isPlaybackCurrent(loadToken) || !heatmapLoad.holds(videoId, loadToken)) return@launch
                 onResult(SecondaryMetadata.Heatmap(videoId, loadToken, heatmap))
+            }
+    }
+
+    /** The hashtags above the title and the rest of the title row, off the same watch response. */
+    fun loadWatchHeader(
+        videoId: String,
+        loadToken: Long,
+    ) {
+        if (!watchHeaderLoad.claim(videoId, loadToken)) return
+
+        watchHeaderLoad.job =
+            scope.launch(networkDispatcher) {
+                awaitPlaybackStarted(videoId)
+                if (!isPlaybackCurrent(loadToken)) return@launch
+                val header =
+                    withTimeoutOrNull(WATCH_HEADER_TIMEOUT_MS) { repository.watchPageHeader(videoId) }
+                        ?: return@launch
+                if (!isPlaybackCurrent(loadToken) || !watchHeaderLoad.holds(videoId, loadToken)) return@launch
+                onResult(SecondaryMetadata.WatchHeader(videoId, loadToken, header))
             }
     }
 
@@ -350,6 +387,7 @@ internal class PlayerSecondaryMetadataLoader(
         if (selected.isNotEmpty()) {
             relatedLoad.takeOver(videoId, loadToken)
             publish(videoId, selected, loadToken)
+            relatedLoad.job = scope.launch(networkDispatcher) { attachPage(videoId, selected, loadToken, awaitPlayback) }
             return
         }
 
@@ -371,26 +409,30 @@ internal class PlayerSecondaryMetadataLoader(
                     )
                 if (managerCandidates.isNotEmpty()) {
                     publish(videoId, managerCandidates, loadToken)
+                    attachPage(videoId, managerCandidates, loadToken, awaitPlayback = false)
                     return@launch
                 }
 
-                val fallbackCandidates =
+                // The watch page first, for its own order; the older lookup retries another client.
+                val fetched =
                     withTimeoutOrNull(RELATED_FALLBACK_TIMEOUT_MS) {
-                        repository.getRelatedCandidates(videoId)
-                    }.orEmpty()
+                        relatedPages.firstPage(videoId)?.takeIf { page ->
+                            PlayerRelatedVideosPolicy.sanitize(videoId, page.videos, shortsEnabled(), exclusions()).isNotEmpty()
+                        } ?: WatchRelatedPage(repository.getRelatedCandidates(videoId))
+                    }
                 if (!isPlaybackCurrent(loadToken) || !relatedLoad.holds(videoId, loadToken)) return@launch
 
                 val resolved =
                     PlayerRelatedVideosPolicy.select(
                         videoId = videoId,
                         primary = primaryCandidates,
-                        fallback = fallbackCandidates,
+                        fallback = fetched?.videos.orEmpty(),
                         current = currentState().relatedVideos,
                         shortsEnabled = shortsEnabled(),
                         exclusions = exclusions(),
                     )
                 if (resolved.isNotEmpty()) {
-                    publish(videoId, resolved, loadToken)
+                    publish(videoId, resolved, loadToken, fetched)
                 } else {
                     Log.d(TAG, "No related videos resolved for $videoId")
                 }
@@ -398,8 +440,8 @@ internal class PlayerSecondaryMetadataLoader(
     }
 
     /**
-     * Folds the NewPipe metadata a fast InnerTube load raced past into the screen once it lands,
-     * then re-arms the related lane and the channel request from the richer references it carries.
+     * Folds the live watch metadata a fast load raced past into the screen once it lands, then
+     * re-arms the related lane and the channel request from the richer references it carries.
      */
     fun refreshLiveWatchMetadata(
         videoId: String,
@@ -410,21 +452,9 @@ internal class PlayerSecondaryMetadataLoader(
 
         liveWatchLoad.job =
             scope.launch(networkDispatcher) {
-                val newPipeMeta =
-                    withTimeoutOrNull(LIVE_NEWPIPE_METADATA_TIMEOUT_MS) {
-                        repository.getLiveWatchMetadataFromNewPipe(videoId)
-                    }
-                val innerTubeMeta =
-                    if (
-                        newPipeMeta == null ||
-                        newPipeMeta.relatedVideos.isEmpty() ||
-                        newPipeMeta.subscriberCount == null
-                    ) {
-                        withTimeoutOrNull(LIVE_INNERTUBE_METADATA_TIMEOUT_MS) { repository.getLiveWatchMetadata(videoId) }
-                    } else {
-                        null
-                    }
-                val meta = newPipeMeta ?: innerTubeMeta ?: return@launch
+                val meta =
+                    withTimeoutOrNull(LIVE_INNERTUBE_METADATA_TIMEOUT_MS) { repository.getLiveWatchMetadata(videoId) }
+                        ?: return@launch
                 if (!isPlaybackCurrent(loadToken)) return@launch
 
                 val likes =
@@ -448,10 +478,7 @@ internal class PlayerSecondaryMetadataLoader(
                 val metadataRelated =
                     PlayerRelatedVideosPolicy.sanitize(
                         videoId = videoId,
-                        candidates =
-                            newPipeMeta?.relatedVideos?.takeIf { it.isNotEmpty() }
-                                ?: innerTubeMeta?.relatedVideos
-                                ?: meta.relatedVideos,
+                        candidates = meta.relatedVideos,
                         shortsEnabled = shortsEnabled(),
                         exclusions = exclusions(),
                     )
@@ -475,21 +502,64 @@ internal class PlayerSecondaryMetadataLoader(
                             video = enriched,
                             relatedVideos = unwatched,
                             channelAvatarUrl = meta.channelAvatarUrl,
-                            subscriberCount = meta.subscriberCount ?: innerTubeMeta?.subscriberCount,
+                            subscriberCount = meta.subscriberCount,
                         ),
                     )
                 }
             }
     }
 
+    /**
+     * The player's own candidates come without their page, which loses the up-next label, the
+     * playlists and the next-page token. The page comes from the watch response this screen loads
+     * for the video anyway, so it costs no request.
+     */
+    private suspend fun attachPage(
+        videoId: String,
+        videos: List<Video>,
+        loadToken: Long,
+        awaitPlayback: Boolean,
+    ) {
+        if (awaitPlayback) awaitPlaybackStarted(videoId)
+        val page = relatedPages.firstPage(videoId) ?: return
+        if (!isPlaybackCurrent(loadToken) || !relatedLoad.holds(videoId, loadToken)) return
+        publish(videoId, videos, loadToken, page)
+    }
+
     private fun publish(
         videoId: String,
         videos: List<Video>,
         loadToken: Long,
+        page: WatchRelatedPage? = null,
     ) {
+        val upNextVideoId = page?.upNextVideoId
         scope.launch(start = CoroutineStart.UNDISPATCHED) {
             val unwatched = PlayerRelatedVideosPolicy.withoutWatched(videos, playerManager.watchedSuggestionsSource)
-            onResult(SecondaryMetadata.Related(videoId = videoId, loadToken = loadToken, videos = unwatched))
+            val ordered = PlayerRelatedVideosPolicy.upNextFirst(unwatched, upNextVideoId)
+            val collections =
+                page
+                    ?.let {
+                        RelatedLanePlacement.place(
+                            listed = it.videos,
+                            shown = ordered,
+                            collections =
+                                PlayerRelatedVideosPolicy.withoutWatchedShorts(
+                                    RelatedLanePlacement.visible(videoId, it.collections, shortsEnabled(), exclusions()),
+                                    playerManager.watchedSuggestionsSource,
+                                ),
+                            upNextVideoId = upNextVideoId,
+                        )
+                    }.orEmpty()
+            onResult(
+                SecondaryMetadata.Related(
+                    videoId = videoId,
+                    loadToken = loadToken,
+                    videos = ordered,
+                    upNextVideoId = upNextVideoId?.takeIf { it == ordered.firstOrNull()?.id },
+                    continuation = page?.continuation,
+                    collections = collections,
+                ),
+            )
         }
     }
 
@@ -506,7 +576,6 @@ internal class PlayerSecondaryMetadataLoader(
         const val PLAYBACK_STARTED_TIMEOUT_MS = 15_000L
         const val CHANNEL_INFO_TIMEOUT_MS = 8_000L
         const val RELATED_FALLBACK_TIMEOUT_MS = 10_000L
-        const val LIVE_NEWPIPE_METADATA_TIMEOUT_MS = 12_000L
         const val LIVE_INNERTUBE_METADATA_TIMEOUT_MS = 8_000L
         const val LIVE_RELATED_SEARCH_TIMEOUT_MS = 8_000L
         const val RYD_TIMEOUT_MS = 5_000L
@@ -515,5 +584,6 @@ internal class PlayerSecondaryMetadataLoader(
         const val CHAPTERS_TIMEOUT_MS = 8_000L
         const val PAID_PROMOTION_TIMEOUT_MS = 8_000L
         const val WATCH_INFO_TIMEOUT_MS = 8_000L
+        const val WATCH_HEADER_TIMEOUT_MS = 8_000L
     }
 }

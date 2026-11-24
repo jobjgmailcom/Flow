@@ -3,6 +3,7 @@ package io.github.aedev.flow.ui.screens.search
 import android.content.Context
 import androidx.lifecycle.SavedStateHandle
 import com.google.common.truth.Truth.assertThat
+import io.github.aedev.flow.data.engagement.HiddenContentStore
 import io.github.aedev.flow.data.local.ContentType
 import io.github.aedev.flow.data.local.Duration
 import io.github.aedev.flow.data.local.PrivacyGate
@@ -22,6 +23,7 @@ import io.mockk.mockk
 import io.mockk.mockkObject
 import io.mockk.runs
 import io.mockk.unmockkAll
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.flowOf
@@ -61,6 +63,7 @@ class SearchViewModelTest {
             mockk(relaxed = true),
             privacyGate,
             savedState,
+            HiddenContentStore(CoroutineScope(Dispatchers.Unconfined)),
         )
 
     @Before
@@ -195,6 +198,24 @@ class SearchViewModelTest {
     }
 
     @Test
+    fun `searching exactly keeps the filters, survives a filter change and ends with a new search`() =
+        runTest(testDispatcher) {
+            val viewModel = viewModel()
+            val filters = SearchFilter(uploadDate = UploadDate.TODAY)
+            viewModel.search("minecarft speedrun", filters)
+
+            viewModel.searchExactly("minecarft speedrun")
+            assertThat(viewModel.uiState.value.exactQuery).isTrue()
+            assertThat(viewModel.uiState.value.filters).isEqualTo(filters)
+
+            viewModel.updateFilters(filters.copy(contentType = ContentType.VIDEOS))
+            assertThat(viewModel.uiState.value.exactQuery).isTrue()
+
+            viewModel.search("minecraft speedrun")
+            assertThat(viewModel.uiState.value.exactQuery).isFalse()
+        }
+
+    @Test
     fun `suggestions come from the one suggestions repository`() =
         runTest {
             val expected = listOf(SearchSuggestion("kotlin tutorial"), SearchSuggestion("kotlin android"))
@@ -207,11 +228,11 @@ class SearchViewModelTest {
         }
 
     @Test
-    fun `a suggestions failure leaves the field usable`() =
+    fun `a failed suggestions request reports no rows rather than an empty list`() =
         runTest {
-            coEvery { suggestions.suggestions(any()) } throws IllegalStateException("offline")
+            coEvery { suggestions.suggestions(any()) } returns null
 
-            assertThat(viewModel().getSearchSuggestions("kotlin")).isEmpty()
+            assertThat(viewModel().getSearchSuggestions("kotlin")).isNull()
         }
 
     @Test

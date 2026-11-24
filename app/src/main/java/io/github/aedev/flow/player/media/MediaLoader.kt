@@ -23,6 +23,7 @@ import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 import androidx.media3.extractor.DefaultExtractorsFactory
 import io.github.aedev.flow.R
+import io.github.aedev.flow.player.analytics.VideoStartupTrace
 import io.github.aedev.flow.player.cache.PlayerCacheManager
 import io.github.aedev.flow.player.config.PlayerConfig
 import io.github.aedev.flow.player.datasource.PlatformCaptionTransport
@@ -36,10 +37,10 @@ import io.github.aedev.flow.player.state.EnhancedPlayerState
 import io.github.aedev.flow.player.stream.ResolvedCaption
 import io.github.aedev.flow.player.stream.StreamProcessor
 import io.github.aedev.flow.player.stream.VideoCodecUtils
+import io.github.aedev.flow.player.stream.model.AudioStream
+import io.github.aedev.flow.player.stream.model.VideoStream
 import io.github.aedev.flow.player.surface.SurfaceManager
 import kotlinx.coroutines.flow.MutableStateFlow
-import org.schabi.newpipe.extractor.stream.AudioStream
-import org.schabi.newpipe.extractor.stream.VideoStream
 import java.io.File
 import java.util.Locale
 
@@ -205,6 +206,7 @@ class MediaLoader(
                 if (mediaSource != null) {
                     exoPlayer.setMediaSource(mediaSource)
                     exoPlayer.prepare()
+                    VideoStartupTrace.onPrepared(mediaId.ifBlank { null })
                     stateFlow.value = stateFlow.value.copy(isPrepared = true)
 
                     // SABR sessions already start fetching at the position; seeking the
@@ -373,6 +375,7 @@ class MediaLoader(
                         cacheManager?.getLiveHlsDataSourceFactory()
                             ?: cacheManager?.getHlsDataSourceFactory()
                             ?: dataSourceFactory,
+                        liveSegmentDataSourceFactory = cacheManager?.getLiveSegmentDataSourceFactory(),
                         mediaId = mediaId,
                         mediaMetadata = mediaMetadata,
                     )

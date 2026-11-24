@@ -1,7 +1,6 @@
 package io.github.aedev.flow.ui.screens.music
 
 import android.app.Activity
-import android.content.Intent
 import android.speech.RecognizerIntent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -25,6 +24,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import io.github.aedev.flow.R
 import io.github.aedev.flow.data.local.SearchType
 import io.github.aedev.flow.data.music.model.MusicArtist
@@ -32,6 +32,8 @@ import io.github.aedev.flow.data.music.model.MusicTrack
 import io.github.aedev.flow.innertube.models.SongItem
 import io.github.aedev.flow.innertube.pages.MoodAndGenres
 import io.github.aedev.flow.ui.components.music.search.MusicSearchBar
+import io.github.aedev.flow.utils.canVoiceSearch
+import io.github.aedev.flow.utils.launchVoiceSearch
 import kotlinx.coroutines.delay
 
 private const val FOCUS_DELAY_MS = 100L
@@ -74,6 +76,7 @@ fun MusicSearchScreen(
         focusManager.clearFocus(force = true)
     }
 
+    val voiceSearchAvailable = remember(context) { canVoiceSearch(context) }
     val voiceSearchLauncher =
         rememberLauncherForActivityResult(
             contract = ActivityResultContracts.StartActivityForResult(),
@@ -87,6 +90,8 @@ fun MusicSearchScreen(
             }
         }
 
+    val deepFlowActive by viewModel.deepFlowActive.collectAsStateWithLifecycle()
+
     Scaffold(
         topBar = {
             MusicSearchBar(
@@ -98,15 +103,14 @@ fun MusicSearchScreen(
                 },
                 onBackClick = onBackClick,
                 onClearClick = viewModel::clearSearch,
-                onVoiceSearchClick = {
-                    val intent =
-                        Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                            putExtra(RecognizerIntent.EXTRA_PROMPT, context.getString(R.string.voice_search_prompt))
-                        }
-                    voiceSearchLauncher.launch(intent)
-                },
+                onVoiceSearchClick =
+                    if (voiceSearchAvailable) {
+                        { launchVoiceSearch(context.getString(R.string.voice_search_prompt), voiceSearchLauncher::launch) }
+                    } else {
+                        null
+                    },
                 focusRequester = focusRequester,
+                privateKeyboard = deepFlowActive,
             )
         },
         containerColor = MaterialTheme.colorScheme.background,

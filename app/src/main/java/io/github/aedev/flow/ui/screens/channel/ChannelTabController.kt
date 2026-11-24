@@ -4,9 +4,12 @@ import androidx.paging.Pager
 import androidx.paging.PagingConfig
 import androidx.paging.PagingData
 import androidx.paging.cachedIn
+import io.github.aedev.flow.data.engagement.HiddenContent
 import io.github.aedev.flow.data.paging.FeedTabPagingSource
+import io.github.aedev.flow.data.paging.withoutHiddenVideos
 import io.github.aedev.flow.innertube.YouTube
 import io.github.aedev.flow.innertube.pages.channel.ChannelFilterGroup
+import io.github.aedev.flow.innertube.pages.channel.ChannelTabContent
 import io.github.aedev.flow.innertube.pages.channel.ChannelTabKind
 import io.github.aedev.flow.innertube.pages.renderer.FeedItem
 import io.github.aedev.flow.innertube.pages.renderer.FeedItemOwner
@@ -17,6 +20,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
@@ -40,6 +44,7 @@ internal data class ChannelTabState(
  */
 internal class ChannelTabController(
     private val scope: CoroutineScope,
+    private val hidden: Flow<HiddenContent>,
 ) {
     private val _states = MutableStateFlow<Map<ChannelTabKind, ChannelTabState>>(emptyMap())
     val states: StateFlow<Map<ChannelTabKind, ChannelTabState>> = _states.asStateFlow()
@@ -71,11 +76,36 @@ internal class ChannelTabController(
         build(kind, params, continuation = null, selected = emptyList())
     }
 
+    /**
+     * Fills a shelves tab from a response already in hand. The channel's landing browse is its
+     * Home tab, so the tab shown first costs no request of its own.
+     */
+    fun seedSections(
+        kind: ChannelTabKind,
+        content: ChannelTabContent,
+    ) {
+        if (kind != ChannelTabKind.Home) return
+        _states.update { states ->
+            states +
+                (
+                    kind to
+                        (states[kind] ?: ChannelTabState()).copy(
+                            sections = content.sections,
+                            filters = content.filters,
+                            selected = content.filters.map { group -> group.selectedIndex },
+                            isLoading = false,
+                            loaded = true,
+                        )
+                )
+        }
+    }
+
     private fun loadSections(
         kind: ChannelTabKind,
         params: String,
     ) {
-        if (_states.value[kind]?.loaded == true) return
+        val current = _states.value[kind]
+        if (current?.loaded == true || current?.isLoading == true) return
         _states.update { it + (kind to (it[kind] ?: ChannelTabState()).copy(isLoading = true)) }
         scope.launch(PerformanceDispatcher.networkIO) {
             val page = YouTube.channelTab(browseId, params, owner, kind).getOrNull()
@@ -137,7 +167,7 @@ internal class ChannelTabController(
     ) {
         val pager =
             Pager(
-                config = PagingConfig(pageSize = PAGE_SIZE, enablePlaceholders = false),
+                config = PagingConfig(pageSize = PAGE_SIZE, prefetchDistance = PREFETCH_DISTANCE, enablePlaceholders = false),
                 pagingSourceFactory = {
                     FeedTabPagingSource(
                         browseId = browseId,
@@ -148,7 +178,9 @@ internal class ChannelTabController(
                         onPageLoaded = { page -> publish(kind, page.filters, page.sections) },
                     )
                 },
-            ).flow.cachedIn(scope)
+            ).flow
+                .cachedIn(scope)
+                .combine(hidden) { items, hidden -> items.withoutHiddenVideos(hidden) }
 
         _states.update { states ->
             val current = states[kind] ?: ChannelTabState()
@@ -177,5 +209,8 @@ internal class ChannelTabController(
 
     private companion object {
         const val PAGE_SIZE = 20
+
+        // Search's distance: the next page starts loading six items from the end, not a page early.
+        const val PREFETCH_DISTANCE = 6
     }
 }

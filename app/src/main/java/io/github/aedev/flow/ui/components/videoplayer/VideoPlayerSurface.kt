@@ -22,6 +22,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
@@ -52,12 +53,14 @@ import io.github.aedev.flow.data.model.Video
 import io.github.aedev.flow.player.EnhancedPlayerManager
 import io.github.aedev.flow.player.PictureInPictureHelper
 import io.github.aedev.flow.player.PipBounds
+import io.github.aedev.flow.player.stream.StoryboardLevel
 import io.github.aedev.flow.player.toDisplayAspectRatioOrNull
 import io.github.aedev.flow.ui.components.shared.clipToCornerRadius
 import io.github.aedev.flow.ui.components.shared.flowPlayerViewLayout
 import io.github.aedev.flow.ui.components.videoplayer.ambient.AmbientFrameCaptureEffect
 import io.github.aedev.flow.ui.components.videoplayer.ambient.AmbientFrameHolder
 import io.github.aedev.flow.ui.components.videoplayer.ambient.VideoAmbientBackground
+import io.github.aedev.flow.ui.utils.rememberIsInPipMode
 import kotlin.math.roundToInt
 
 @androidx.annotation.OptIn(androidx.media3.common.util.UnstableApi::class)
@@ -71,12 +74,14 @@ fun VideoPlayerSurface(
     ambientMode: Boolean = false,
     ambientFrames: AmbientFrameHolder? = null,
     ambientGlow: Boolean = false,
+    ambientStoryboard: List<StoryboardLevel> = emptyList(),
     spherical: Boolean = false,
     sphericalMotion: Boolean = true,
     sphericalTouch: Boolean = false,
     sphericalStill: Boolean = false,
     sphericalZoom: () -> Float = { 1f },
     sphericalDragSpeed: Float = 1f,
+    tvInterface: Boolean = false,
 ) {
     val ambientActive = ambientMode && resizeMode == 0 && !spherical
     val localAmbientFrames = remember { AmbientFrameHolder() }
@@ -102,9 +107,9 @@ fun VideoPlayerSurface(
     val cornerRadiusPx = with(density) { cornerRadiusDp.dp.toPx() }
 
     val playerView =
-        remember(spherical) {
+        remember(spherical, tvInterface) {
             Log.d("EnhancedVideoPlayer", "Creating shared PlayerView (sdk=${Build.VERSION.SDK_INT} spherical=$spherical)")
-            (LayoutInflater.from(context).inflate(flowPlayerViewLayout(spherical), null) as PlayerView).apply {
+            (LayoutInflater.from(context).inflate(flowPlayerViewLayout(spherical, tvInterface), null) as PlayerView).apply {
                 layoutParams =
                     FrameLayout.LayoutParams(
                         ViewGroup.LayoutParams.MATCH_PARENT,
@@ -119,11 +124,12 @@ fun VideoPlayerSurface(
 
     DisposableEffect(playerView) {
         val surfaceView = playerView.videoSurfaceView?.takeUnless { it is SphericalGLSurfaceView } as? SurfaceView
+        val manager = EnhancedPlayerManager.getInstance()
+        manager.setVideoOutputIsSurfaceView(surfaceView != null)
         if (surfaceView == null) {
             return@DisposableEffect onDispose { }
         }
 
-        val manager = EnhancedPlayerManager.getInstance()
         var attachedHolder: SurfaceHolder? = null
         var attachedSurface: Surface? = null
 
@@ -240,7 +246,15 @@ fun VideoPlayerSurface(
 
     val currentSurfaceRestoreTrigger = surfaceRestoreTrigger
 
-    AmbientFrameCaptureEffect(playerView, !spherical && (ambientActive || ambientGlow), frames)
+    AmbientFrameCaptureEffect(
+        playerView = playerView,
+        active = !spherical && (ambientActive || ambientGlow),
+        holder = frames,
+        // A PiP window is STARTED but has no room for bars and never shows the glow.
+        paused = rememberIsInPipMode(),
+        storyboard = ambientStoryboard,
+        thumbnailUrl = video.thumbnailUrl,
+    )
 
     Box(modifier = modifier.fillMaxSize()) {
         if (ambientActive) AmbientBars(frames, ambientVideoAspect)
@@ -400,7 +414,7 @@ private fun Modifier.forwardTouchesTo(
 
 private const val SEEK_FRAME_REDRAW_DELAY_MS = 50L
 
-/** Reads the frame in its own scope, so each new frame recomposes the bars and not the surface. */
+/** Only the first frame recomposes here; every frame after it is read in draw. */
 @Composable
 private fun AmbientBars(
     frames: AmbientFrameHolder,
@@ -410,11 +424,10 @@ private fun AmbientBars(
     // its dark base, which used to black out the backdrop around the video for a moment.
     val ambientAppear = remember { Animatable(0f) }
     val ambientFade = MaterialTheme.motionScheme.slowEffectsSpec<Float>()
-    val frame = frames.state.frame
-    val ambientReady = frame != null
+    val ambientReady by remember(frames) { derivedStateOf { frames.state.frame != null } }
     LaunchedEffect(ambientReady) { if (ambientReady) ambientAppear.animateTo(1f, ambientFade) }
     VideoAmbientBackground(
-        frame = frame,
+        frames = frames,
         videoAspect = videoAspect,
         modifier = Modifier.fillMaxSize().graphicsLayer { alpha = ambientAppear.value },
     )

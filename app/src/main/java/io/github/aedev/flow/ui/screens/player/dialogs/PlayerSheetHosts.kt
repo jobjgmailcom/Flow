@@ -36,9 +36,12 @@ import io.github.aedev.flow.data.model.Comment
 import io.github.aedev.flow.data.model.LiveChatMessage
 import io.github.aedev.flow.data.model.Video
 import io.github.aedev.flow.data.model.toVideo
-import io.github.aedev.flow.data.model.uploadDateMillis
+import io.github.aedev.flow.innertube.models.response.VideoChapter
 import io.github.aedev.flow.player.EnhancedPlayerManager
+import io.github.aedev.flow.player.RepeatMode
 import io.github.aedev.flow.player.state.EnhancedPlayerState
+import io.github.aedev.flow.player.videoRepeatMode
+import io.github.aedev.flow.ui.components.layout.navigation.LocalMediaNavigator
 import io.github.aedev.flow.ui.components.shared.FlowDescriptionBottomSheet
 import io.github.aedev.flow.ui.components.shared.FlowNoteEditorDialog
 import io.github.aedev.flow.ui.components.shared.MediaDownloadPrompt
@@ -67,7 +70,6 @@ import io.github.aedev.flow.ui.screens.player.state.transcriptTrackUrl
 import io.github.aedev.flow.ui.screens.player.state.visibleComments
 import io.github.aedev.flow.utils.DateContext
 import kotlinx.coroutines.launch
-import org.schabi.newpipe.extractor.stream.StreamSegment
 
 /**
  * The surfaces the portrait bottom-sheet slot, the landscape fullscreen side panel and the tablet
@@ -77,7 +79,7 @@ import org.schabi.newpipe.extractor.stream.StreamSegment
 @Composable
 internal fun PlayerChaptersSheetHost(
     screenState: PlayerScreenState,
-    chapters: List<StreamSegment>,
+    chapters: List<VideoChapter>,
     thumbnailUrl: String,
     asSidePanel: Boolean,
     expandedHeight: Dp?,
@@ -126,9 +128,12 @@ internal fun PlayerQueueSheetHost(
         queueVideos = queueVideos,
         currentQueueIndex = currentQueueIndex,
         playlistTitle = playerState.queueTitle,
-        isLooping = playerState.isQueueLooping,
+        repeatMode = videoRepeatMode(queueLoop = playerState.isQueueLooping, videoLoop = playerState.isLooping),
         isShuffled = playerState.isQueueShuffled,
-        onLoopToggle = manager::toggleQueueLoop,
+        onRepeatModeChange = { mode ->
+            manager.toggleLoop(mode == RepeatMode.ONE)
+            if (playerState.isQueueLooping != (mode == RepeatMode.ALL)) manager.toggleQueueLoop(mode == RepeatMode.ALL)
+        },
         onShuffleToggle = manager::toggleQueueShuffle,
         onPlayVideoAtIndex = { index -> manager.playVideoAtIndex(index, loadStreamsInPlayer = loadStreamsInPlayer) },
         onRemoveVideoAtIndex = { index ->
@@ -166,11 +171,13 @@ internal fun PlayerDescriptionSheetHost(
     val videoNote by viewModel.videoNote.collectAsStateWithLifecycle()
     val videoNotesEnabled by viewModel.videoNotesEnabled.collectAsStateWithLifecycle()
     var showNoteEditor by rememberSaveable(video.id) { mutableStateOf(false) }
+    val navigator = LocalMediaNavigator.current
     LaunchedEffect(video.id) {
         viewModel.loadDescription(video.id)
     }
     FlowDescriptionBottomSheet(
         video = video,
+        onHashtagClick = { tag -> navigator.openSearch("#$tag") },
         descriptionPage = descriptionPage,
         tags = (listOfNotNull(video.category) + video.tags).distinct(),
         chapterCount = uiState.chapters.size,
@@ -207,7 +214,7 @@ internal fun PlayerTranscriptSheetHost(
     screenState: PlayerScreenState,
     playerState: EnhancedPlayerState,
     prefs: VideoPlayerPreferencesState,
-    chapters: List<StreamSegment>,
+    chapters: List<VideoChapter>,
     artworkUrl: String?,
     exportTitle: String?,
     asSidePanel: Boolean,

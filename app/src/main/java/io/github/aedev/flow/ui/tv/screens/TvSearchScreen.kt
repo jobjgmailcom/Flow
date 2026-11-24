@@ -23,6 +23,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
@@ -52,12 +53,14 @@ import io.github.aedev.flow.ui.screens.music.MusicSearchBody
 import io.github.aedev.flow.ui.screens.music.MusicSearchViewModel
 import io.github.aedev.flow.ui.screens.search.SearchResultsBody
 import io.github.aedev.flow.ui.screens.search.SearchViewModel
-import io.github.aedev.flow.ui.screens.search.launchVoiceSearch
 import io.github.aedev.flow.ui.screens.search.rememberSearchState
 import io.github.aedev.flow.ui.screens.search.rememberSearchSubmitter
 import io.github.aedev.flow.ui.tv.components.TvScreenFrame
 import io.github.aedev.flow.ui.tv.theme.LocalTvDimens
-import kotlinx.coroutines.flow.drop
+import io.github.aedev.flow.utils.canVoiceSearch
+import io.github.aedev.flow.utils.launchVoiceSearch
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
 
 private val KindSelectorWidth = 320.dp
 
@@ -86,12 +89,12 @@ fun TvSearchScreen(
     val dimens = LocalTvDimens.current
     val softwareKeyboard = LocalSoftwareKeyboardController.current
     val uiState by viewModel.uiState.collectAsState()
-    val state = rememberSearchState(viewModel)
+    var kind by rememberSaveable { mutableStateOf(MediaKind.Videos) }
+    val state = rememberSearchState(viewModel, suggestionsActive = { kind != MediaKind.Music })
     val quickActions = sharedQuickActionsViewModel()
     val submitVideo = rememberSearchSubmitter(viewModel, state, quickActions)
     val pagingItems = viewModel.searchResults.collectAsLazyPagingItems()
     val gridState = rememberLazyGridState()
-    var kind by rememberSaveable { mutableStateOf(MediaKind.Videos) }
     val text = state.textFieldState
     val kinds = MediaKind.entries.map { FlowToggleOption(it, stringResource(it.labelRes), it.icon) }
 
@@ -104,12 +107,15 @@ fun TvSearchScreen(
         if (kind == MediaKind.Music) musicViewModel.performSearch(query) else submitVideo(query, uiState.filters)
     }
 
+    // Only the kind on screen asks for suggestions; switching to music hands it what was typed.
     LaunchedEffect(state) {
-        snapshotFlow { text.text.toString() }
-            .drop(1)
+        snapshotFlow { text.text.toString().takeIf { kind == MediaKind.Music } }
+            .distinctUntilChanged()
+            .filterNotNull()
             .collect(musicViewModel::onQueryChange)
     }
 
+    val voiceSearchAvailable = remember(context) { canVoiceSearch(context) }
     val voiceLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             if (result.resultCode != Activity.RESULT_OK) return@rememberLauncherForActivityResult
@@ -135,9 +141,12 @@ fun TvSearchScreen(
                     placeholder = stringResource(R.string.search_videos_channels_placeholder),
                     onSearch = { submit() },
                     modifier = Modifier.weight(1f),
+                    privateKeyboard = state.deepFlow.active,
                 )
-                IconButton(onClick = { launchVoiceSearch(context, voiceLauncher::launch) }) {
-                    Icon(imageVector = Icons.Rounded.Mic, contentDescription = stringResource(R.string.voice_search_cd))
+                if (voiceSearchAvailable) {
+                    IconButton(onClick = { launchVoiceSearch(context.getString(R.string.search_voice_prompt), voiceLauncher::launch) }) {
+                        Icon(imageVector = Icons.Rounded.Mic, contentDescription = stringResource(R.string.voice_search_cd))
+                    }
                 }
                 FlowConnectedToggleGroup(
                     options = kinds,
@@ -191,6 +200,10 @@ fun TvSearchScreen(
                     onPlaylistClick = onPlaylistClick,
                     onShortsQueue = {},
                     dismissKeyboard = state::stopTyping,
+                    onSearch = { query ->
+                        text.setTextAndPlaceCursorAtEnd(query)
+                        submitVideo(query, uiState.filters)
+                    },
                     maxAutoColumns = dimens.feedMaxColumns,
                     minCellWidth = dimens.feedCardMinWidth,
                 )

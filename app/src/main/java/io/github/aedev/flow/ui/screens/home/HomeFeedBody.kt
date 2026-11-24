@@ -3,22 +3,31 @@ package io.github.aedev.flow.ui.screens.home
 import android.os.SystemClock
 import androidx.activity.compose.ReportDrawnWhen
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.lazy.grid.LazyGridState
 import androidx.compose.foundation.lazy.grid.rememberLazyGridState
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleStartEffect
@@ -30,8 +39,9 @@ import io.github.aedev.flow.data.model.Video
 import io.github.aedev.flow.data.shorts.queue.ShortsQueueSource
 import io.github.aedev.flow.ui.TabScrollEventBus
 import io.github.aedev.flow.ui.components.FeedGridLayout
+import io.github.aedev.flow.ui.components.shared.BackOnlineEffect
 import io.github.aedev.flow.ui.components.shared.FeedGridSkeleton
-import io.github.aedev.flow.ui.components.shared.FlowErrorState
+import io.github.aedev.flow.ui.components.shared.LocalNetworkOnline
 import io.github.aedev.flow.ui.screens.home.chips.HomeChipContent
 import io.github.aedev.flow.ui.screens.home.chips.HomeChipsState
 import kotlinx.coroutines.delay
@@ -39,6 +49,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 private const val SKELETON_CARD_COUNT = 12
 
@@ -161,14 +172,20 @@ internal fun HomeFeedBody(
     onShortClick: (ShortsQueueSource) -> Unit,
     onNavigateToHistory: () -> Unit,
     onOpenShortsFeed: () -> Unit,
+    onOpenDownloads: (() -> Unit)? = null,
     showShorts: Boolean = true,
+    topPadding: Dp = 0.dp,
+    headerOffsetPx: () -> Float = { 0f },
 ) {
     val context = LocalContext.current
+    val belowHeader = Modifier.padding(top = topPadding)
+    val statusBars = WindowInsets.statusBars
     val scope = rememberCoroutineScope()
     val newVideosButtonEnabled by viewModel.newVideosButtonEnabled.collectAsStateWithLifecycle()
+    val online by LocalNetworkOnline.current
     when {
         !homeFeedEnabled -> {
-            HomeFeedDisabledState(modifier = Modifier.fillMaxSize())
+            HomeFeedDisabledState(modifier = belowHeader.fillMaxSize())
         }
 
         !chips.isAll -> {
@@ -181,6 +198,7 @@ internal fun HomeFeedBody(
                 onPlayMix = { mix -> onPlayMix(mix.videos, context.getString(R.string.home_mix_title, mix.seed.title)) },
                 onRefresh = viewModel::refreshSelectedChip,
                 onEnrichVideo = viewModel::enrichChipVideo,
+                topPadding = topPadding,
             )
         }
 
@@ -188,16 +206,21 @@ internal fun HomeFeedBody(
             FeedGridSkeleton(
                 layout = feedLayout,
                 listMode = isListView,
-                stackedInset = !feedLayout.cardsBleed,
                 placeholderCount = SKELETON_CARD_COUNT,
-                compactRowSpacing = if (isListView) 0.dp else feedLayout.cardSpacing,
+                modifier = belowHeader,
             )
         }
 
-        uiState.error != null && uiState.videos.isEmpty() -> {
-            FlowErrorState(
-                error = uiState.error ?: stringResource(R.string.error_occurred),
+        // Offline, every source comes back empty and the feed settles with no error at all, which
+        // left a blank page; no connection and nothing to show is the error.
+        uiState.videos.isEmpty() && (uiState.error != null || !online) -> {
+            BackOnlineEffect { viewModel.retry() }
+            HomeErrorState(
+                error = uiState.error ?: stringResource(R.string.error_no_internet),
                 onRetry = { viewModel.retry() },
+                onDownloadClick = onVideoClick,
+                onOpenDownloads = onOpenDownloads,
+                modifier = belowHeader,
             )
         }
 
@@ -208,6 +231,12 @@ internal fun HomeFeedBody(
                     uiState.continueWatchingVideos.isNotEmpty()
             }
 
+            // Cards already on screen stay put when the connection returns; the pill offers the fresh feed.
+            var backOnline by remember { mutableStateOf(false) }
+            BackOnlineEffect { backOnline = true }
+            LaunchedEffect(uiState.isRefreshing, uiState.pendingFeed) {
+                if (uiState.isRefreshing || uiState.pendingFeed != null) backOnline = false
+            }
             Box(modifier = Modifier.fillMaxSize()) {
                 HomeFeedGrid(
                     uiState = uiState,
@@ -215,7 +244,7 @@ internal fun HomeFeedBody(
                     isListView = isListView,
                     gridState = gridStates.feed,
                     onVideoClick = onVideoClick,
-                    onEnrichChannelMetadata = viewModel::enrichChannelMetadataIfMissing,
+                    onEnrichChannelMetadata = null,
                     onContinueWatchingClick = { entry -> onVideoClick(entry.toResumeVideo()) },
                     onContinueWatchingRemove = viewModel::removeContinueWatchingEntry,
                     onShortClick = { shelf, tapped ->
@@ -229,6 +258,7 @@ internal fun HomeFeedBody(
                     // Since v5 the feed can end at a few dozen cards; a list that just stops reads as broken (#1317).
                     footerMinVideos = 0,
                     showShorts = showShorts,
+                    topPadding = topPadding,
                 )
                 HomeNewVideosButton(
                     visible = uiState.pendingFeed != null && newVideosButtonEnabled,
@@ -236,7 +266,26 @@ internal fun HomeFeedBody(
                         viewModel.showNewVideos()
                         scope.launch { gridStates.feed.scrollToItem(0) }
                     },
-                    modifier = Modifier.align(Alignment.TopCenter),
+                    // Rides up with the header as it scrolls away, stopping under the status bar.
+                    modifier =
+                        Modifier.align(Alignment.TopCenter).offset {
+                            val top = topPadding.toPx() + headerOffsetPx()
+                            IntOffset(0, top.roundToInt().coerceAtLeast(statusBars.getTop(this)))
+                        },
+                )
+                HomeNewVideosButton(
+                    visible = backOnline && uiState.pendingFeed == null,
+                    onClick = {
+                        backOnline = false
+                        viewModel.refreshFeed()
+                    },
+                    label = stringResource(R.string.home_back_online_refresh),
+                    icon = Icons.Rounded.Refresh,
+                    modifier =
+                        Modifier.align(Alignment.TopCenter).offset {
+                            val top = topPadding.toPx() + headerOffsetPx()
+                            IntOffset(0, top.roundToInt().coerceAtLeast(statusBars.getTop(this)))
+                        },
                 )
             }
         }

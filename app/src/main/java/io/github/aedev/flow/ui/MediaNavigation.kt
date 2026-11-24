@@ -3,9 +3,11 @@ package io.github.aedev.flow.ui
 import android.net.Uri
 import androidx.navigation.NavController
 import androidx.navigation.NavHostController
+import io.github.aedev.flow.data.local.SearchFilter
 import io.github.aedev.flow.data.shorts.queue.ShortsQueueSource
 import io.github.aedev.flow.ui.components.layout.navigation.MediaNavigator
 import io.github.aedev.flow.ui.components.settings.SettingsTarget
+import io.github.aedev.flow.ui.screens.search.searchRoute
 import io.github.aedev.flow.utils.YouTubeLink
 
 internal const val MUSIC_ARTIST_ROUTE_PATTERN = "artist/{channelId}"
@@ -88,6 +90,12 @@ internal class FlowMediaNavigator(
         navController.navigate("settings?target=${target.encode()}")
     }
 
+    override fun openSearch(query: String) {
+        if (query.isBlank()) return
+        beforeNavigate()
+        navController.navigate(searchRoute(query, SearchFilter.DEFAULT, depth = 1))
+    }
+
     override fun openEqualizer() {
         beforeNavigate()
         if (navController.currentBackStackEntry?.destination?.route == EQUALIZER_ROUTE) return
@@ -122,23 +130,10 @@ internal class FlowMediaNavigator(
         return true
     }
 
-    /**
-     * The video player stays hidden while a Shorts screen is on top, and the player route hands back
-     * to whatever is under it, so every Shorts screen has to go first or the video would play unseen.
-     */
     private fun openPlayer(navigate: () -> Unit) {
-        while (isShortsOnTop() && navController.previousBackStackEntry != null) navController.popBackStack()
-        if (isShortsOnTop()) {
-            navController.navigate(shortsExitRoute()) {
-                popUpTo(SHORTS_ROUTE_PATTERN) { saveState = true }
-                launchSingleTop = true
-                restoreState = true
-            }
-        }
+        navController.leaveShortsForPlayer(shortsExitRoute())
         navigate()
     }
-
-    private fun isShortsOnTop() = navController.currentBackStackEntry?.destination?.route == SHORTS_ROUTE_PATTERN
 
     private fun openCollection(id: String) = open(musicCollectionRoute(id))
 

@@ -17,7 +17,6 @@ import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.Timeline
-import androidx.media3.common.TrackSelectionOverride
 import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
@@ -29,18 +28,18 @@ import androidx.media3.session.MediaSession
 import dagger.hilt.android.EntryPointAccessors
 import io.github.aedev.flow.data.local.PlayerPreferences
 import io.github.aedev.flow.data.local.SponsorBlockAction
-import io.github.aedev.flow.data.local.VideoQuality
 import io.github.aedev.flow.data.localmedia.LocalMediaIds
 import io.github.aedev.flow.data.model.SponsorBlockCategories
 import io.github.aedev.flow.data.model.SponsorBlockSegment
 import io.github.aedev.flow.data.model.Video
+import io.github.aedev.flow.data.repository.WatchRelatedPages
 import io.github.aedev.flow.data.repository.YouTubeRepository
 import io.github.aedev.flow.innertube.YouTube
-import io.github.aedev.flow.innertube.models.YouTubeClient
 import io.github.aedev.flow.innertube.models.response.PlayerResponse
 import io.github.aedev.flow.player.analytics.PlaybackAnalyticsLogger
 import io.github.aedev.flow.player.analytics.RenderedFirstFrameListener
 import io.github.aedev.flow.player.analytics.SphericalVideoListener
+import io.github.aedev.flow.player.analytics.VideoStartupTrace
 import io.github.aedev.flow.player.audio.AudioEffectsEntryPoint
 import io.github.aedev.flow.player.audio.AudioFeaturesManager
 import io.github.aedev.flow.player.audio.AudioSessionAnnouncer
@@ -53,19 +52,30 @@ import io.github.aedev.flow.player.config.VideoSizeCap
 import io.github.aedev.flow.player.config.resetVideoSizeTo
 import io.github.aedev.flow.player.error.PlayerDiagnostics
 import io.github.aedev.flow.player.error.PlayerErrorHandler
+import io.github.aedev.flow.player.factory.BandwidthSeedRecorder
 import io.github.aedev.flow.player.factory.PlayerFactory
+import io.github.aedev.flow.player.live.LiveEdgePolicy
+import io.github.aedev.flow.player.live.LivePegPolicy
+import io.github.aedev.flow.player.live.LiveSegmentSessions
+import io.github.aedev.flow.player.live.LiveSessionLog
+import io.github.aedev.flow.player.live.LiveTrafficMeter
 import io.github.aedev.flow.player.media.MediaLoader
 import io.github.aedev.flow.player.preload.GaplessPreloadController
 import io.github.aedev.flow.player.preload.PreloadTarget
 import io.github.aedev.flow.player.quality.AdaptiveLadder
 import io.github.aedev.flow.player.quality.LiveQualityPick
 import io.github.aedev.flow.player.quality.LiveQualitySelection
+import io.github.aedev.flow.player.quality.PlayerViewport
 import io.github.aedev.flow.player.quality.QualityManager
+import io.github.aedev.flow.player.quality.VideoDecoderSupport
+import io.github.aedev.flow.player.queue.QueuePage
+import io.github.aedev.flow.player.queue.QueuePageLoader
+import io.github.aedev.flow.player.queue.QueuePageSource
+import io.github.aedev.flow.player.queue.QueueSourceSpec
 import io.github.aedev.flow.player.recovery.ClearedMediaRecoveryState
 import io.github.aedev.flow.player.recovery.StreamDenialReloader
 import io.github.aedev.flow.player.resolver.AdaptiveDashManifest
 import io.github.aedev.flow.player.sabr.integration.SabrStreamInfo
-import io.github.aedev.flow.player.sabr.integration.SabrUrlResolver
 import io.github.aedev.flow.player.service.BackgroundServiceManager
 import io.github.aedev.flow.player.sponsorblock.SponsorBlockHandler
 import io.github.aedev.flow.player.sponsorblock.SponsorBlockSkip
@@ -83,6 +93,9 @@ import io.github.aedev.flow.player.stream.ResolvedStreamData
 import io.github.aedev.flow.player.stream.ServicePlaybackStreamSelector
 import io.github.aedev.flow.player.stream.StreamProcessor
 import io.github.aedev.flow.player.stream.VideoCodecUtils
+import io.github.aedev.flow.player.stream.model.AudioStream
+import io.github.aedev.flow.player.stream.model.StreamType
+import io.github.aedev.flow.player.stream.model.VideoStream
 import io.github.aedev.flow.player.subtitle.SubtitleAutoPolicy
 import io.github.aedev.flow.player.subtitle.SubtitleDelay
 import io.github.aedev.flow.player.subtitle.SubtitleTracks
@@ -91,7 +104,6 @@ import io.github.aedev.flow.player.surface.VideoSurfacePolicy
 import io.github.aedev.flow.player.tracker.PlaybackTracker
 import io.github.aedev.flow.utils.FlowCrashHandler
 import io.github.aedev.flow.utils.NetworkState
-import io.github.aedev.flow.utils.ThumbnailUrlResolver
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -110,22 +122,17 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
-import org.schabi.newpipe.extractor.ServiceList
-import org.schabi.newpipe.extractor.stream.AudioStream
-import org.schabi.newpipe.extractor.stream.StreamInfo
-import org.schabi.newpipe.extractor.stream.StreamInfoItem
-import org.schabi.newpipe.extractor.stream.StreamType
-import org.schabi.newpipe.extractor.stream.VideoStream
 
 @UnstableApi
 class EnhancedPlayerManager private constructor() {
     companion object {
         private const val TAG = PlayerConfig.TAG
-        private const val LIVE_EDGE_THRESHOLD_MS = 700L
         private const val SABR_QUALITY_KEY_PREFIX = "sabr:"
         private const val LIVE_QUALITY_KEY_PREFIX = "live:"
         private const val AUTO_NEXT_TAG = "FlowVideoAutoNext"
@@ -147,6 +154,8 @@ class EnhancedPlayerManager private constructor() {
     private var player: ExoPlayer? = null
     private var trackSelector: DefaultTrackSelector? = null
     private var bandwidthMeter: DefaultBandwidthMeter? = null
+    private var bandwidthSeedRecorder: BandwidthSeedRecorder? = null
+    private var viewportJob: Job? = null
     private var analyticsLogger: PlaybackAnalyticsLogger? = null
     private var videoEqualizer: EqualizerAudioProcessor? = null
     private var eqObserver: Job? = null
@@ -201,6 +210,10 @@ class EnhancedPlayerManager private constructor() {
     private var pendingLiveDisplaySeekPositionMs: Long? = null
     private var pendingLiveDisplaySeekAtMs: Long = 0L
     private var pendingInitialLiveEdgeSeek = false
+    private val liveSessionLog = LiveSessionLog(LiveTrafficMeter::snapshot)
+    private var livePegRule: LivePegPolicy.Rule? = null
+    private var liveHasPlayed = false
+    private var liveRebuffering = false
 
     private var currentSabrInfo: SabrStreamInfo? = null
     private var sabrPreferred = false
@@ -247,6 +260,11 @@ class EnhancedPlayerManager private constructor() {
     private val scope = CoroutineScope(Dispatchers.Main + SupervisorJob())
     private val buildScope = PlayerBuildScope(scope)
 
+    private val queuePages = QueuePageLoader(scope, ::onQueuePage)
+
+    /** A skip or auto-advance that reached the end of what had loaded, waiting for the next page. */
+    private var advanceAfterPage: (() -> Unit)? = null
+
     private val autoplayCountdownController =
         AutoplayCountdownController(
             scope = scope,
@@ -281,7 +299,12 @@ class EnhancedPlayerManager private constructor() {
                         resolved.enrichedVideo
                             .toVideoSessionMetadata()
                             .toMedia3Metadata(),
-                    adaptiveLadder = AdaptiveLadder.forPreload(resolved.videoStream, videoStreams, resolved.preferredCodec),
+                    adaptiveLadder =
+                        AdaptiveLadder.forPreload(
+                            resolved.videoStream,
+                            autoLadderStreams(videoStreams),
+                            resolved.preferredCodec,
+                        ),
                 )
             },
             log = { autoNextLog(it) },
@@ -535,6 +558,10 @@ class EnhancedPlayerManager private constructor() {
     private var diskReadAhead: DiskReadAhead? = null
     private var qualityManager: QualityManager? = null
     private var surfaceManager: SurfaceManager? = null
+
+    // What the player view on screen actually inflated; the TV interface picks a SurfaceView on any version.
+    @Volatile
+    private var videoOutputIsSurfaceView = VideoSurfacePolicy.usesSurfaceView(Build.VERSION.SDK_INT)
     private var sponsorBlockHandler: SponsorBlockHandler? = null
     private var playbackTracker: PlaybackTracker? = null
     private var errorHandler: PlayerErrorHandler? = null
@@ -604,6 +631,8 @@ class EnhancedPlayerManager private constructor() {
         if (player != null) return
         val applicationContext = context.applicationContext
         appContext = applicationContext
+        // Off the startup path: the decoder lists only matter once Auto picks a rung.
+        scope.launch(Dispatchers.IO) { VideoDecoderSupport.prewarm(applicationContext) }
         withContext(Dispatchers.IO) {
             playerFactory.preloadPreferences(applicationContext)
             PlayerCacheManager.preload(applicationContext)
@@ -625,9 +654,16 @@ class EnhancedPlayerManager private constructor() {
         audioFeaturesManager = AudioFeaturesManager(scope, _playerState)
 
         // Initialize bandwidth meter and track selector via factory
-        bandwidthMeter = playerFactory.createBandwidthMeter(context)
+        bandwidthMeter =
+            playerFactory.createBandwidthMeter(context).also { bandwidthSeedRecorder = BandwidthSeedRecorder(context, scope, it) }
         videoSizeCap = VideoSizeCap.forDevice(context)
         trackSelector = playerFactory.createTrackSelector(context, videoSizeCap)
+        VideoDecoderSupport.attach(context)
+        viewportJob =
+            combine(GlobalPlayerState.miniPlayerExpansionState, GlobalPlayerState.isInPipMode, PlayerViewport::isSmall)
+                .distinctUntilChanged()
+                .onEach { small -> trackSelector?.let { PlayerViewport.apply(it, small) } }
+                .launchIn(scope)
 
         // Initialize media loader
         mediaLoader =
@@ -687,7 +723,7 @@ class EnhancedPlayerManager private constructor() {
                 onGatedCodecFallback = { position -> qualityManager?.fallbackToAlternateCodec(position) ?: false },
                 getFailedStreamUrls = {
                     qualityManager?.let { qm ->
-                        (availableVideoStreams.map { it.getContent() } + castAudioStreams.map { it.getContent() })
+                        (availableVideoStreams.map { it.content } + castAudioStreams.map { it.content })
                             .filter { qm.hasStreamFailed(it) }
                             .toSet()
                     } ?: emptySet()
@@ -744,6 +780,8 @@ class EnhancedPlayerManager private constructor() {
                 onLivePlaybackTick = { exoPlayer ->
                     mediaLoader?.getActiveSabrOrchestrator()?.updatePlayhead(exoPlayer.currentPosition)
                     updateLiveEdgeState(exoPlayer)
+                    val liveWindowMs = exoPlayer.duration.takeIf { it != C.TIME_UNSET }?.coerceAtLeast(0L) ?: 0L
+                    liveSessionLog.tick(liveWindowMs, LiveEdgePolicy.behindLiveMs(liveWindowMs, exoPlayer.currentPosition))
                     if (currentIsLiveStream &&
                         _playerState.value.playbackSpeed > 1.0f &&
                         isPlayerAtLiveEdge(exoPlayer)
@@ -792,7 +830,10 @@ class EnhancedPlayerManager private constructor() {
                 }
             }
         player?.addAnalyticsListener(
-            RenderedFirstFrameListener(currentVideoId = { currentVideoId }) { videoId -> _firstFrameVideoId.value = videoId },
+            RenderedFirstFrameListener(currentVideoId = { currentVideoId }) { videoId ->
+                _firstFrameVideoId.value = videoId
+                VideoStartupTrace.onFirstFrame(videoId)
+            },
         )
         player?.addAnalyticsListener(
             SphericalVideoListener { spherical ->
@@ -943,6 +984,14 @@ class EnhancedPlayerManager private constructor() {
                         )
                     }
 
+                    if (playbackState == Player.STATE_ENDED && !isRecoveringFromBackground && currentIsLiveStream &&
+                        LiveSegmentSessions.hasEnded(currentVideoId)
+                    ) {
+                        autoNextLog("STATE_ENDED on a live stream whose broadcast ended")
+                        _playerState.value = _playerState.value.copy(hasEnded = true)
+                        return
+                    }
+
                     if (playbackState == Player.STATE_ENDED && !isRecoveringFromBackground && exoLive) {
                         val now = System.currentTimeMillis()
                         if (now - lastLiveEdgeRecoveryMs < 2500L) {
@@ -972,9 +1021,17 @@ class EnhancedPlayerManager private constructor() {
 
                     if (playbackState == Player.STATE_BUFFERING) {
                         logBandwidthInfo()
+                        liveSessionLog.onBuffering()
+                        if (currentIsLiveStream && liveHasPlayed) liveRebuffering = true
                     }
 
                     if (playbackState == Player.STATE_READY) {
+                        liveSessionLog.onReady()
+                        liveHasPlayed = true
+                        if (liveRebuffering) {
+                            liveRebuffering = false
+                            player?.let(::pegToLiveAfterStall)
+                        }
                         releaseAdvanceWakeLock()
                         autoNextLog("STATE_READY scheduling preload")
                         preload.schedule()
@@ -1053,7 +1110,7 @@ class EnhancedPlayerManager private constructor() {
 
                 override fun onIsPlayingChanged(isPlaying: Boolean) {
                     _playerState.value = _playerState.value.copy(isPlaying = isPlaying)
-                    if (isPlaying) abandonedSkips.onPlaybackStarted()
+                    if (isPlaying) abandonedSkips.onPlaybackStarted() else bandwidthSeedRecorder?.save()
                     autoNextLog("onIsPlayingChanged isPlaying=$isPlaying")
                 }
 
@@ -1165,6 +1222,8 @@ class EnhancedPlayerManager private constructor() {
         keepAudioOnly: Boolean = false,
         preferSabr: Boolean = false,
         preferredLiveQualityHeight: Int = 0,
+        liveDvrEnabled: Boolean = true,
+        livePegRule: LivePegPolicy.Rule? = null,
     ) {
         if (!isOnMainThread()) {
             autoNextLog("setStreams switching to main id=$videoId from=${Thread.currentThread().name}")
@@ -1189,6 +1248,8 @@ class EnhancedPlayerManager private constructor() {
                     keepAudioOnly = keepAudioOnly,
                     preferSabr = preferSabr,
                     preferredLiveQualityHeight = preferredLiveQualityHeight,
+                    liveDvrEnabled = liveDvrEnabled,
+                    livePegRule = livePegRule,
                 )
             }
             return
@@ -1239,7 +1300,22 @@ class EnhancedPlayerManager private constructor() {
             if (isLiveStream) LiveQualitySelection.targetHeight(videoId, liveQualityPick, preferredLiveQualityHeight) else 0
         if (isLiveStream) applyLiveCodecPreference()
         updateLivePlaybackMode(isLive = isLiveStream, forceLiveSpeedReset = true)
+        _playerState.value = _playerState.value.copy(isLiveDvrEnabled = !isLiveStream || liveDvrEnabled)
+        this.livePegRule = livePegRule.takeIf { isLiveStream }
+        liveHasPlayed = false
+        liveRebuffering = false
         pendingInitialLiveEdgeSeek = streamType == StreamType.LIVE_STREAM
+        if (isLiveStream) {
+            val source =
+                when {
+                    LiveSegmentSessions.isSessionUri(currentDashManifestUrl) -> "segments"
+                    !currentHlsUrl.isNullOrEmpty() -> "hls"
+                    else -> "dash"
+                }
+            liveSessionLog.start(videoId, source)
+        } else {
+            liveSessionLog.stop()
+        }
         currentVideoId = videoId
 
         // Process streams using StreamProcessor
@@ -1296,7 +1372,7 @@ class EnhancedPlayerManager private constructor() {
                             ?.let(QualityManager::normalizeQualityHeight)
                             ?: 0
                     },
-                currentQualityKey = if (isAutoMode) null else currentVideoStream?.getContent()?.takeIf { it.isNotBlank() },
+                currentQualityKey = if (isAutoMode) null else currentVideoStream?.content?.takeIf { it.isNotBlank() },
                 currentAudioTrack = StreamProcessor.indexOfAudioTrack(availableAudioStreams, currentAudioStream),
                 isLive = currentIsLiveStream,
                 isAtLiveEdge = false,
@@ -1369,6 +1445,7 @@ class EnhancedPlayerManager private constructor() {
                 playWhenReady = player?.playWhenReady ?: true,
                 isAtLiveEdge = false,
                 liveDurationMs = 0L,
+                isLiveDvrEnabled = true,
                 availableSubtitles = emptyList(),
                 selectedSubtitleUrl = null,
                 sphericalOverride = null,
@@ -1471,7 +1548,7 @@ class EnhancedPlayerManager private constructor() {
 
         if (localFilePath != null) {
             Log.d(TAG, "loadMediaInternal: Playing local file: $localFilePath")
-            qualityManager?.isAdaptiveLadderActive = false
+            qualityManager?.setActiveLadder(emptyList())
             return mediaLoader?.loadMedia(
                 player = player,
                 context = appContext,
@@ -1544,7 +1621,7 @@ class EnhancedPlayerManager private constructor() {
                 mediaMetadata = sessionMetadata?.toMedia3Metadata() ?: MediaMetadata.EMPTY,
                 adaptiveLadder = ladder,
             ) ?: false
-        qualityManager?.isAdaptiveLadderActive = result && mediaLoader?.lastSourceWasAdaptiveLadder == true
+        qualityManager?.setActiveLadder(if (result && mediaLoader?.lastSourceWasAdaptiveLadder == true) ladder else emptyList())
         if (result) {
             qualityManager?.isDashSource = !currentDashManifestUrl.isNullOrEmpty()
         }
@@ -1592,14 +1669,18 @@ class EnhancedPlayerManager private constructor() {
         title: String? = null,
         shuffle: Boolean? = null,
         startPlayback: Boolean = true,
+        more: QueuePageSource? = null,
     ) {
         if (!isOnMainThread()) {
             autoNextLog("setQueue posted to main size=${videos.size} start=$startIndex from=${Thread.currentThread().name}")
-            mainHandler.post { setQueue(videos, startIndex, title, shuffle, startPlayback) }
+            mainHandler.post { setQueue(videos, startIndex, title, shuffle, startPlayback, more) }
             return
         }
         val startVideo = queue.setQueue(videos, startIndex, title, shuffle)
-        autoNextLog("setQueue size=${videos.size} start=${queue.currentIndex} title=$title")
+        advanceAfterPage = null
+        queuePages.attach(more, queue.generation)
+        queue.morePending = more != null && videos.isNotEmpty()
+        autoNextLog("setQueue size=${videos.size} start=${queue.currentIndex} title=$title more=${more != null}")
 
         updateQueueState()
 
@@ -1612,6 +1693,11 @@ class EnhancedPlayerManager private constructor() {
     fun playNext(loadStreamsInPlayer: Boolean = true): Boolean {
         val nextIndex =
             queue.nextIndex() ?: run {
+                if (queue.morePending && queuePages.load()) {
+                    autoNextLog("playNext waiting for the next queue page")
+                    advanceAfterPage = { playNext(loadStreamsInPlayer) }
+                    return true
+                }
                 autoNextLog("playNext queue unavailable")
                 return false
             }
@@ -1632,6 +1718,7 @@ class EnhancedPlayerManager private constructor() {
     }
 
     fun playPrevious(loadStreamsInPlayer: Boolean = true): Boolean {
+        advanceAfterPage = null
         val previousVideo = queue.movePrevious() ?: return false
         startPlaybackFromQueue(previousVideo, loadStreamsInPlayer)
         updateQueueState()
@@ -1749,6 +1836,7 @@ class EnhancedPlayerManager private constructor() {
         loadStreamsInPlayer: Boolean = true,
     ) {
         if (index == queue.currentIndex) return
+        advanceAfterPage = null
         val video = queue.moveTo(index) ?: return
         startPlaybackFromQueue(video, loadStreamsInPlayer)
         updateQueueState()
@@ -1824,7 +1912,36 @@ class EnhancedPlayerManager private constructor() {
         }
     }
 
+    /** Where the queue's later pages will come from, saved with the queue so a restore carries on. */
+    val queueSourceSpec: QueueSourceSpec? get() = queuePages.spec
+
+    private fun onQueuePage(
+        generation: Int,
+        page: QueuePage?,
+    ) {
+        if (generation != queue.generation) return
+        val waiting = advanceAfterPage
+        advanceAfterPage = null
+        if (page != null) {
+            val added = queue.appendPage(generation, page.videos)
+            queue.morePending = queuePages.hasMore
+            autoNextLog("queue page added=$added more=${queuePages.hasMore}")
+            onQueueMutated("queue-page")
+            waiting?.invoke()
+            return
+        }
+        autoNextLog("queue page failed waiting=${waiting != null}")
+        if (waiting == null) return
+        // The advance can't wait for a page that didn't come; it goes on as if the queue ended here,
+        // and the next position change asks for the page again.
+        queue.morePending = false
+        waiting()
+        queue.morePending = queuePages.hasMore
+        updateQueueState()
+    }
+
     private fun updateQueueState() {
+        if (!queue.isEmpty) queuePages.onPosition(queue.remainingAfterCurrent)
         _playerState.value =
             _playerState.value.copy(
                 hasNext = hasNext(),
@@ -1976,6 +2093,11 @@ class EnhancedPlayerManager private constructor() {
             // Queue autoplay can be disabled independently; manual next still works.
             if (!queueAutoplayEnabled) {
                 autoNextLog("auto-advance queue disabled")
+                return
+            }
+            if (queue.nextIndex() == null && queue.morePending && queuePages.load()) {
+                autoNextLog("auto-advance waiting for the next queue page")
+                advanceAfterPage = ::performAutoAdvance
                 return
             }
             autoNextLog("auto-advance queue playNext")
@@ -2225,7 +2347,9 @@ class EnhancedPlayerManager private constructor() {
                         translateTo = preferredSubtitleLanguage,
                     ),
             durationSeconds = InnerTubeVideoMapper.durationSeconds(extraction),
-            dashManifestUrl = extraction.liveDashUrl,
+            dashManifestUrl =
+                extraction.takeIf { it.isLive }?.let { LiveSegmentSessions.open(videoId, it.playerResponse) }
+                    ?: extraction.liveDashUrl,
             hlsUrl = extraction.liveHlsUrl,
             streamType = InnerTubeVideoMapper.streamType(extraction),
             startPosition = startPositionMs,
@@ -2234,6 +2358,8 @@ class EnhancedPlayerManager private constructor() {
             itAudioFormats = extraction.audioFormats,
             preferredVideoCodec = preferredCodecKey,
             keepAudioOnly = keepAudioOnly,
+            liveDvrEnabled = extraction.playerResponse.videoDetails?.isLiveDvrEnabled != false,
+            livePegRule = LivePegPolicy.ruleFor(extraction.playerResponse),
         )
         return true
     }
@@ -2268,10 +2394,34 @@ class EnhancedPlayerManager private constructor() {
         val videos: List<Video> = emptyList(),
     )
 
+    /**
+     * A preloaded video's related list is read once it plays, not when it is preloaded: most
+     * preloads are never reached, and each read is a whole watch response held in memory (#2204).
+     */
+    private fun loadAutoplayCandidates(videoId: String) {
+        scope.launch {
+            val related =
+                try {
+                    visibleRelatedCandidates(videoId)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    Log.w(TAG, "Related videos for $videoId not loaded", e)
+                    return@launch
+                }
+            if (currentVideoId == videoId) setAutoplayCandidates(videoId, related, autoplayEnabled)
+        }
+    }
+
     private suspend fun visibleRelatedCandidates(videoId: String): List<Video> {
-        val candidates = YouTubeRepository.getInstance().getRelatedCandidates(videoId)
+        val repository = YouTubeRepository.getInstance()
+        val page = WatchRelatedPages(repository).firstPage(videoId)
+        val candidates = page?.videos ?: repository.getRelatedCandidates(videoId)
         return withContext(Dispatchers.Default) {
-            PlayerRelatedVideosPolicy.sanitizeHidden(videoId, candidates, feedExclusionsSource, watchedSuggestionsSource)
+            PlayerRelatedVideosPolicy.upNextFirst(
+                PlayerRelatedVideosPolicy.sanitizeHidden(videoId, candidates, feedExclusionsSource, watchedSuggestionsSource),
+                page?.upNextVideoId,
+            )
         }
     }
 
@@ -2337,10 +2487,10 @@ class EnhancedPlayerManager private constructor() {
                 durationSeconds = InnerTubeVideoMapper.durationSeconds(extraction),
                 dashManifestUrl = extraction.liveDashUrl,
                 streamType = InnerTubeVideoMapper.streamType(extraction),
-                relatedVideos = visibleRelatedCandidates(video.id),
                 preferredCodec = preferredCodecKey,
                 itVideoFormats = extraction.videoFormats,
                 itAudioFormats = extraction.audioFormats,
+                extraction = extraction,
             )
         }
 
@@ -2361,6 +2511,8 @@ class EnhancedPlayerManager private constructor() {
         val pre = preload.consume() ?: return
         autoNextLog("promotePreloadedItem ${pre.data.enrichedVideo.id} fromQueue=${pre.fromQueue}")
         val data = pre.data
+        // Before the id changes: the watch page's load for it starts from that change.
+        data.extraction?.let { InnerTubeVideoStreamExtractor.handOffPromoted(data.enrichedVideo.id, it) }
         Log.d(TAG, "Gapless: promoting auto-advanced item ${data.enrichedVideo.id} (fromQueue=${pre.fromQueue})")
 
         mediaLoader?.releaseSabr()
@@ -2387,7 +2539,7 @@ class EnhancedPlayerManager private constructor() {
         castAudioStreams = data.audioStreams
         subtitleTracks.load(data.enrichedVideo.id, StreamProcessor.processCaptions(data.subtitles), acceptsEmbedded = false)
         resetSubtitleDelayFor(data.enrichedVideo.id)
-        val ladder = AdaptiveLadder.forPreload(data.videoStream, availableVideoStreams, data.preferredCodec)
+        val ladder = AdaptiveLadder.forPreload(data.videoStream, autoLadderStreams(availableVideoStreams), data.preferredCodec)
         currentVideoStream = data.videoStream ?: ladder.lastOrNull() ?: availableVideoStreams.firstOrNull()
         currentAudioStream = data.audioStream
         applySubtitleTrackSelection()
@@ -2397,7 +2549,7 @@ class EnhancedPlayerManager private constructor() {
         qualityManager?.preferredCodecKey = data.preferredCodec
         qualityManager?.isDashSource = !currentDashManifestUrl.isNullOrEmpty()
         qualityManager?.setCurrentStream(currentVideoStream)
-        qualityManager?.isAdaptiveLadderActive = AdaptiveDashManifest.build(ladder, data.durationSeconds) != null
+        qualityManager?.setActiveLadder(if (AdaptiveDashManifest.build(ladder, data.durationSeconds) != null) ladder else emptyList())
         if (data.videoStream != null) {
             qualityManager?.setManualMode(VideoCodecUtils.qualityHeightFromStream(data.videoStream))
         }
@@ -2415,7 +2567,8 @@ class EnhancedPlayerManager private constructor() {
             channel = data.enrichedVideo.channelName,
             thumbnail = data.enrichedVideo.thumbnailUrl,
         )
-        setAutoplayCandidates(data.enrichedVideo.id, data.relatedVideos, autoplayEnabled)
+        setAutoplayCandidates(data.enrichedVideo.id, emptyList(), autoplayEnabled)
+        loadAutoplayCandidates(data.enrichedVideo.id)
 
         val isAutoMode = data.videoStream == null
         _playerState.value =
@@ -2446,7 +2599,7 @@ class EnhancedPlayerManager private constructor() {
                             ?.let(QualityManager::normalizeQualityHeight)
                             ?: 0
                     },
-                currentQualityKey = if (isAutoMode) null else currentVideoStream?.getContent()?.takeIf { it.isNotBlank() },
+                currentQualityKey = if (isAutoMode) null else currentVideoStream?.content?.takeIf { it.isNotBlank() },
                 currentAudioTrack = StreamProcessor.indexOfAudioTrack(availableAudioStreams, currentAudioStream),
                 isLive = false,
                 isAtLiveEdge = false,
@@ -2618,6 +2771,7 @@ class EnhancedPlayerManager private constructor() {
 
     fun seekToLiveTimeline(position: Long) {
         val p = player ?: return
+        if (_playerState.value.isSeekLocked) return
         val isLive = currentIsLiveStream || p.isCurrentMediaItemLive
         val target = resolveSeekTarget(p, position)
         if (isLive) {
@@ -2660,7 +2814,15 @@ class EnhancedPlayerManager private constructor() {
         updateLiveEdgeState(p)
     }
 
+    private fun pegToLiveAfterStall(exoPlayer: ExoPlayer) {
+        val behindLiveMs = LiveEdgePolicy.behindLiveMs(exoPlayer.duration, exoPlayer.currentPosition)
+        if (!LivePegPolicy.shouldPeg(livePegRule, behindLiveMs)) return
+        autoNextLog("live stall left playback ${behindLiveMs}ms behind on a stream without DVR -> seekToLiveEdge")
+        seekToLiveEdge(resetSpeed = false)
+    }
+
     private fun markLiveDisplaySeek(positionMs: Long) {
+        liveSessionLog.onSeek()
         pendingLiveDisplaySeekPositionMs = positionMs.coerceAtLeast(0L)
         pendingLiveDisplaySeekAtMs = SystemClock.elapsedRealtime()
     }
@@ -3326,6 +3488,10 @@ class EnhancedPlayerManager private constructor() {
         )
     }
 
+    fun setVideoOutputIsSurfaceView(value: Boolean) {
+        videoOutputIsSurfaceView = value
+    }
+
     fun restoreVideoOutput() {
         val p = player ?: return
         val displayInteractive = isDisplayInteractive()
@@ -3333,7 +3499,7 @@ class EnhancedPlayerManager private constructor() {
         val surfaceValid = surfaceManager?.isSurfaceValid() == true || _playerState.value.showsSpherical
         val canRestore =
             VideoSurfacePolicy.canRestoreVideoOutput(
-                sdkInt = Build.VERSION.SDK_INT,
+                outputIsSurfaceView = videoOutputIsSurfaceView,
                 isDisplayInteractive = displayInteractive,
                 isSurfaceValid = surfaceValid,
             )
@@ -3403,6 +3569,10 @@ class EnhancedPlayerManager private constructor() {
 
     fun getBandwidthEstimate(): Long = bandwidthMeter?.bitrateEstimate ?: 0L
 
+    /** The streams a preloaded ladder may hold; the same filter Auto applies to the playing video. */
+    private fun autoLadderStreams(streams: List<VideoStream>): List<VideoStream> =
+        VideoDecoderSupport.forAuto(streams).filter(videoSizeCap::fits)
+
     fun logBandwidthInfo() {
         val mbps = getBandwidthEstimate() / 1_000_000.0
         Log.d(TAG, "Bandwidth: ${"%.2f".format(mbps)} Mbps")
@@ -3458,6 +3628,8 @@ class EnhancedPlayerManager private constructor() {
         manualLoopEnabled = false
         autoplayCandidates = emptyList()
         autoplaySourceVideoId = null
+        advanceAfterPage = null
+        queuePages.clear()
         queue.clear()
         _playerState.value =
             _playerState.value.copy(
@@ -3485,26 +3657,7 @@ class EnhancedPlayerManager private constructor() {
 
     private fun isPlayerAtLiveEdge(player: ExoPlayer): Boolean {
         if (!currentIsLiveStream && !player.isCurrentMediaItemLive) return false
-
-        val liveOffset = player.currentLiveOffset
-        if (liveOffset != C.TIME_UNSET && liveOffset > 0L) {
-            return liveOffset <= PlayerConfig.LIVE_EDGE_GAP_MS + LIVE_EDGE_THRESHOLD_MS
-        }
-
-        val timeline = player.currentTimeline
-        val windowIndex = player.currentMediaItemIndex
-        if (!timeline.isEmpty && windowIndex >= 0 && windowIndex < timeline.windowCount) {
-            val window = Timeline.Window()
-            timeline.getWindow(windowIndex, window)
-            val defaultPosition = window.defaultPositionMs
-            if (defaultPosition != C.TIME_UNSET) {
-                return player.currentPosition + LIVE_EDGE_THRESHOLD_MS >= defaultPosition
-            }
-        }
-
-        val duration = player.duration
-        return duration > 0L && duration != C.TIME_UNSET &&
-            duration - player.currentPosition <= LIVE_EDGE_THRESHOLD_MS
+        return LiveEdgePolicy.isAtEdge(player.duration, player.currentPosition)
     }
 
     fun release() {
@@ -3525,6 +3678,10 @@ class EnhancedPlayerManager private constructor() {
         audioSessionAnnouncer = null
         diskReadAhead?.release()
         diskReadAhead = null
+        bandwidthSeedRecorder?.release()
+        bandwidthSeedRecorder = null
+        viewportJob?.cancel()
+        viewportJob = null
         player?.release()
         player = null
         playerFactory.clearPreferences()
@@ -3568,7 +3725,7 @@ class EnhancedPlayerManager private constructor() {
                     }
 
                     currentVideoStream?.let { stream ->
-                        if (qualityManager?.hasStreamFailed(stream.getContent()) == true) {
+                        if (qualityManager?.hasStreamFailed(stream.content) == true) {
                             val working =
                                 qualityManager?.getWorkingStreams()?.maxByOrNull {
                                     VideoCodecUtils.qualityHeightFromStream(it)

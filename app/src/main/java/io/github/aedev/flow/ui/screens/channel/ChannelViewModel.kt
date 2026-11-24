@@ -11,6 +11,7 @@ import io.github.aedev.flow.data.community.PostCommentsLoader
 import io.github.aedev.flow.data.contentfilter.aislist.AiListRepository
 import io.github.aedev.flow.data.contentfilter.aislist.AiVerdict
 import io.github.aedev.flow.data.contentfilter.aislist.AllowedAiChannel
+import io.github.aedev.flow.data.engagement.HiddenContentStore
 import io.github.aedev.flow.data.local.ChannelSubscription
 import io.github.aedev.flow.data.local.PlayerPreferences
 import io.github.aedev.flow.data.local.SubscriptionRepository
@@ -21,10 +22,12 @@ import io.github.aedev.flow.data.notes.NotesRepository
 import io.github.aedev.flow.data.shorts.withoutShorts
 import io.github.aedev.flow.data.subscriptions.markChannelSeen
 import io.github.aedev.flow.innertube.YouTube
+import io.github.aedev.flow.innertube.pages.channel.ChannelTabContent
 import io.github.aedev.flow.innertube.pages.channel.ChannelTabKind
 import io.github.aedev.flow.innertube.pages.renderer.FeedItemOwner
 import io.github.aedev.flow.ui.youtubeChannelBrowseId
 import io.github.aedev.flow.ui.youtubeChannelUrl
+import io.github.aedev.flow.utils.LoadErrorKind
 import io.github.aedev.flow.utils.PerformanceDispatcher
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
@@ -53,6 +56,7 @@ class ChannelViewModel
         private val notesRepository: NotesRepository,
         private val playerPreferences: PlayerPreferences,
         private val aiList: AiListRepository,
+        hiddenContent: HiddenContentStore,
     ) : ViewModel() {
         /** Which channels the user follows, so a featured-channel row can show its real state. */
         val subscribedChannelIds: StateFlow<Set<String>> =
@@ -141,7 +145,7 @@ class ChannelViewModel
         internal val communityUiState: StateFlow<ChannelCommunityUiState> = communityController.state
         val postComments = PostCommentsLoader(viewModelScope)
 
-        private val tabController = ChannelTabController(viewModelScope)
+        private val tabController = ChannelTabController(viewModelScope, hiddenContent.hidden)
         internal val tabStates: StateFlow<Map<ChannelTabKind, ChannelTabState>> =
             combine(tabController.states, playerPreferences.shortsContentEnabled) { states, shortsEnabled ->
                 if (shortsEnabled) states else states.mapValues { (_, state) -> state.copy(sections = state.sections.withoutShorts()) }
@@ -220,13 +224,13 @@ class ChannelViewModel
                         loadSubscriptionState(channelId)
                         observeNote(channelId)
                         markSeen(channelId)
-                        onTabsResolved()
+                        onTabsResolved(page.tabs.firstOrNull { it.selected }?.kind, page.initialTab)
                     },
                     onFailure = { error ->
                         Log.e(TAG, "Failed to load channel", error)
                         _uiState.update {
                             it.copy(
-                                error = error.message ?: appContext.getString(R.string.error_failed_to_load_channel),
+                                error = appContext.getString(LoadErrorKind.of(error).messageRes(R.string.error_failed_to_load_channel)),
                                 isLoading = false,
                             )
                         }
@@ -243,10 +247,14 @@ class ChannelViewModel
             playerPreferences.updateSubscriptionChannelSeenAt { stored -> markChannelSeen(stored, channelId, now, subscribed) }
         }
 
-        private fun onTabsResolved() {
+        private fun onTabsResolved(
+            landingKind: ChannelTabKind?,
+            landing: ChannelTabContent?,
+        ) {
             val state = _uiState.value
             val channelId = state.channelId ?: return
             tabController.reset(channelId, channelOwner())
+            if (landingKind != null && landing != null) tabController.seedSections(landingKind, landing)
             val first = state.selectedTab ?: state.tabs.firstOrNull()?.kind ?: return
             _uiState.update { it.copy(selectedTab = first) }
             ensureTabLoaded(first)

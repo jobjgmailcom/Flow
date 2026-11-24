@@ -213,8 +213,15 @@ class PlaybackLoadResolver
             }
         }
 
-        private fun extractionFailureCause(videoId: String): Throwable? =
-            InnerTubeVideoStreamExtractor.blockOf(videoId)?.let(::PlaybackBlockedException)
+        private fun extractionFailureCause(videoId: String): Throwable? {
+            val block = InnerTubeVideoStreamExtractor.blockOf(videoId)
+            val refusal = InnerTubeVideoStreamExtractor.refusalOf(videoId)
+            return when {
+                block != null -> PlaybackBlockedException(block, refusal)
+                InnerTubeVideoStreamExtractor.isGone(videoId) || refusal != null -> VideoUnavailableException(videoId, refusal)
+                else -> null
+            }
+        }
 
         private suspend fun extractInnerTube(
             videoId: String,
@@ -224,9 +231,10 @@ class PlaybackLoadResolver
                 if (forceSabr) {
                     InnerTubeVideoStreamExtractor.extract(videoId, forceSabr = true)
                 } else {
-                    withTimeoutOrNull(INNERTUBE_TIMEOUT_MS) {
-                        InnerTubeVideoStreamExtractor.extract(videoId, forceSabr = false)
-                    }
+                    InnerTubeVideoStreamExtractor.takePromoted(videoId)
+                        ?: withTimeoutOrNull(INNERTUBE_TIMEOUT_MS) {
+                            InnerTubeVideoStreamExtractor.extract(videoId, forceSabr = false)
+                        }
                 }
             } catch (e: CancellationException) {
                 throw e

@@ -48,10 +48,11 @@ internal fun BoxScope.PlayerLockedControls(
     seekbarContent: PlayerSeekbarContent,
     pillHeight: Dp,
     topPadding: Dp,
-    seekbarHorizontalPadding: Dp,
-    seekbarBottomPadding: Dp,
+    seekbarHorizontalPadding: () -> Dp,
+    seekbarBottomPadding: () -> Dp,
     onRevealUnlock: () -> Unit,
     onUnlock: () -> Unit,
+    isPlaying: Boolean = true,
 ) {
     LockModeTouchShield(
         onRevealUnlock = onRevealUnlock,
@@ -91,8 +92,7 @@ internal fun BoxScope.PlayerLockedControls(
             modifier =
                 Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = seekbarHorizontalPadding)
-                    .padding(bottom = seekbarBottomPadding),
+                    .insetPadding(start = seekbarHorizontalPadding, end = seekbarHorizontalPadding, bottom = seekbarBottomPadding),
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             PlayerTimePill(
@@ -105,6 +105,7 @@ internal fun BoxScope.PlayerLockedControls(
                     Modifier
                         .height(pillHeight)
                         .align(Alignment.Start),
+                isPlaying = isPlaying,
             )
             LockedSeekbar(
                 positionProvider = positionProvider,

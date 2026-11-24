@@ -10,12 +10,12 @@ import androidx.media3.exoplayer.hls.playlist.DefaultHlsPlaylistTracker
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.source.MergingMediaSource
 import io.github.aedev.flow.player.config.PlayerConfig
+import io.github.aedev.flow.player.live.LiveSegmentMediaSource
+import io.github.aedev.flow.player.live.LiveSegmentSessions
 import io.github.aedev.flow.player.stream.StreamProcessor
 import io.github.aedev.flow.player.stream.VideoCodecUtils
-import org.schabi.newpipe.extractor.stream.AudioStream
-import org.schabi.newpipe.extractor.stream.DeliveryMethod
-import org.schabi.newpipe.extractor.stream.Stream
-import org.schabi.newpipe.extractor.stream.VideoStream
+import io.github.aedev.flow.player.stream.model.AudioStream
+import io.github.aedev.flow.player.stream.model.VideoStream
 
 /**
  * Specialized resolver for video playback that handles different stream types
@@ -35,6 +35,7 @@ class VideoPlaybackResolver(
     private val progressiveDataSourceFactory: DataSource.Factory,
     private val liveDashDataSourceFactory: DataSource.Factory = dashDataSourceFactory,
     private val liveHlsDataSourceFactory: DataSource.Factory = progressiveDataSourceFactory,
+    private val liveSegmentDataSourceFactory: DataSource.Factory? = null,
     private val mediaId: String = "",
     private val mediaMetadata: MediaMetadata = MediaMetadata.EMPTY,
 ) {
@@ -62,6 +63,12 @@ class VideoPlaybackResolver(
             "Resolving playback: ${videoStreams.size} video streams, audio=${audioStream != null}, " +
                 "dash=${!dashManifestUrl.isNullOrEmpty()}, hls=${!hlsUrl.isNullOrEmpty()}, duration=${durationSeconds}s",
         )
+
+        val liveSession = dashManifestUrl?.takeIf { isLiveStream }?.let { LiveSegmentSessions.forUri(Uri.parse(it)) }
+        if (liveSession != null && liveSegmentDataSourceFactory != null) {
+            Log.d(TAG, "Using live segments for ${liveSession.videoId}: ${liveSession.formats.size} formats")
+            return LiveSegmentMediaSource.create(liveSession, liveSegmentDataSourceFactory, mediaId, mediaMetadata)
+        }
 
         if (isLiveStream && !hlsUrl.isNullOrEmpty()) {
             try {
@@ -101,7 +108,7 @@ class VideoPlaybackResolver(
             }
         }
 
-        if (isLiveStream && !dashManifestUrl.isNullOrEmpty()) {
+        if (isLiveStream && !dashManifestUrl.isNullOrEmpty() && !LiveSegmentSessions.isSessionUri(dashManifestUrl)) {
             try {
                 Log.d(TAG, "Using YouTube DASH manifest for live DVR playback: ${dashManifestUrl.take(80)}...")
 
@@ -254,39 +261,14 @@ class VideoPlaybackResolver(
             return null
         }
 
-        val deliveryMethod = stream.deliveryMethod
-        Log.d(
-            TAG,
-            "Creating video source: ${VideoCodecUtils.qualityHeightFromStream(
-                stream,
-            )}p, delivery=$deliveryMethod, videoOnly=${stream.isVideoOnly}",
-        )
+        Log.d(TAG, "Creating video source: ${VideoCodecUtils.qualityHeightFromStream(stream)}p, videoOnly=${stream.isVideoOnly}")
 
+        // Every stream is a progressive googlevideo URL; a generated DASH manifest over it avoids throttling.
         return try {
-            when (deliveryMethod) {
-                DeliveryMethod.DASH -> {
-                    // OTF (On The Fly) streams - generate DASH manifest
-                    createOtfDashSource(stream, durationSeconds)
-                }
-
-                DeliveryMethod.PROGRESSIVE_HTTP -> {
-                    // Progressive streams - generate DASH manifest to avoid throttling
-                    if (stream.isVideoOnly && durationSeconds > 0) {
-                        createProgressiveDashSource(stream, durationSeconds)
-                    } else {
-                        // Fallback for non-video-only streams
-                        createProgressiveSource(stream)
-                    }
-                }
-
-                DeliveryMethod.HLS -> {
-                    createHlsSource(stream)
-                }
-
-                else -> {
-                    Log.w(TAG, "Unknown delivery method: $deliveryMethod, using progressive")
-                    createProgressiveSource(stream)
-                }
+            if (stream.isVideoOnly && durationSeconds > 0) {
+                createProgressiveDashSource(stream, durationSeconds)
+            } else {
+                createProgressiveSource(stream)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error creating video source, falling back to progressive", e)
@@ -309,58 +291,17 @@ class VideoPlaybackResolver(
             return null
         }
 
-        val deliveryMethod = audioStream.deliveryMethod
-        Log.d(TAG, "Creating audio source: ${audioStream.averageBitrate}kbps, delivery=$deliveryMethod")
+        Log.d(TAG, "Creating audio source: ${audioStream.averageBitrate}kbps")
 
         return try {
-            when (deliveryMethod) {
-                DeliveryMethod.DASH -> {
-                    createOtfDashSourceForAudio(audioStream, durationSeconds)
-                }
-
-                DeliveryMethod.PROGRESSIVE_HTTP -> {
-                    // Generate DASH manifest for audio to avoid throttling
-                    if (durationSeconds > 0 && audioStream.itagItem != null) {
-                        createProgressiveDashSourceForAudio(audioStream, durationSeconds)
-                    } else {
-                        createProgressiveSourceForAudio(audioStream)
-                    }
-                }
-
-                else -> {
-                    createProgressiveSourceForAudio(audioStream)
-                }
+            if (durationSeconds > 0 && audioStream.itagItem != null) {
+                createProgressiveDashSourceForAudio(audioStream, durationSeconds)
+            } else {
+                createProgressiveSourceForAudio(audioStream)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error creating audio source, falling back to progressive", e)
             createProgressiveSourceForAudio(audioStream)
-        }
-    }
-
-    /**
-     * Create DASH source from OTF (On The Fly) stream URL
-     */
-    private fun createOtfDashSource(
-        stream: VideoStream,
-        durationSeconds: Long,
-    ): MediaSource {
-        val itagItem =
-            stream.itagItem
-                ?: throw IllegalStateException("No ItagItem for DASH stream")
-
-        Log.d(TAG, "Generating OTF DASH manifest for ${VideoCodecUtils.qualityHeightFromStream(stream)}p video")
-        val manifestString = ManifestGenerator.generateOtfManifest(stream, itagItem, durationSeconds)
-
-        return if (manifestString != null) {
-            MediaSourceBuilder.buildDashSource(
-                dashDataSourceFactory,
-                manifestString,
-                Uri.parse(stream.content),
-                playbackItem(stream.content).build(),
-            )
-        } else {
-            Log.w(TAG, "OTF manifest generation failed, using progressive")
-            createProgressiveSource(stream)
         }
     }
 
@@ -389,32 +330,6 @@ class VideoPlaybackResolver(
 
         Log.w(TAG, "Progressive DASH manifest generation failed, using raw progressive (may throttle)")
         return createProgressiveSource(stream)
-    }
-
-    /**
-     * Create OTF DASH source for audio
-     */
-    private fun createOtfDashSourceForAudio(
-        stream: AudioStream,
-        durationSeconds: Long,
-    ): MediaSource {
-        val itagItem =
-            stream.itagItem
-                ?: return createProgressiveSourceForAudio(stream)
-
-        Log.d(TAG, "Generating OTF DASH manifest for audio")
-        val manifestString = ManifestGenerator.generateOtfManifest(stream, itagItem, durationSeconds)
-
-        return if (manifestString != null) {
-            MediaSourceBuilder.buildDashSource(
-                dashDataSourceFactory,
-                manifestString,
-                Uri.parse(stream.content),
-                playbackItem(stream.content).build(),
-            )
-        } else {
-            createProgressiveSourceForAudio(stream)
-        }
     }
 
     /**
@@ -469,18 +384,6 @@ class VideoPlaybackResolver(
         return androidx.media3.exoplayer.source.ProgressiveMediaSource
             .Factory(progressiveDataSourceFactory)
             .createMediaSource(item)
-    }
-
-    /**
-     * Create HLS source
-     */
-    private fun createHlsSource(stream: Stream): MediaSource {
-        Log.d(TAG, "Creating HLS source")
-        return MediaSourceBuilder.buildHlsSource(
-            progressiveDataSourceFactory,
-            Uri.parse(stream.content),
-            playbackItem(stream.content).build(),
-        )
     }
 
     private fun playbackItem(uri: String): MediaItem.Builder =
